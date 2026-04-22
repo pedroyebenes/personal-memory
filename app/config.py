@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_DATABASE_PATH = Path("data/cache/memory.sqlite3")
+DEFAULT_CONFIG_PATH = Path("config.json")
 DEFAULT_EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_TOP_K = 5
 DEFAULT_ENABLE_LLM_SYNTHESIS = False
@@ -35,9 +36,11 @@ class Settings:
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
 
 
-def _parse_bool(value: str | None, default: bool) -> bool:
+def _parse_bool(value: bool | str | None, default: bool) -> bool:
     if value is None:
         return default
+    if isinstance(value, bool):
+        return value
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -48,12 +51,20 @@ def _load_config_file(path: Path | None) -> dict[str, Any]:
         return json.load(handle)
 
 
-def load_settings(config_path: str | None = None) -> Settings:
-    file_path = Path(config_path) if config_path else Path("config.json")
-    file_values = _load_config_file(file_path if file_path.exists() else None)
+def _coerce_path(value: str | None, *, base_dir: Path | None = None, resolve: bool = False) -> Path | None:
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return path.resolve() if resolve else path
 
-    vault_value = os.getenv("VAULT_PATH", file_values.get("VAULT_PATH"))
-    db_value = os.getenv("DATABASE_PATH", file_values.get("DATABASE_PATH"))
+
+def load_settings(config_path: str | None = None) -> Settings:
+    file_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+    file_values = _load_config_file(file_path if file_path.exists() else None)
+    config_dir = file_path.resolve().parent if file_path.exists() else None
+
     model_value = os.getenv("EMBEDDING_MODEL_NAME", file_values.get("EMBEDDING_MODEL_NAME"))
     top_k_value = os.getenv("TOP_K", file_values.get("TOP_K"))
     enable_value = os.getenv("ENABLE_LLM_SYNTHESIS", file_values.get("ENABLE_LLM_SYNTHESIS"))
@@ -66,9 +77,17 @@ def load_settings(config_path: str | None = None) -> Settings:
     gemini_base_url = os.getenv("GEMINI_BASE_URL", file_values.get("GEMINI_BASE_URL"))
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", file_values.get("OLLAMA_BASE_URL"))
 
+    vault_path = _coerce_path(os.getenv("VAULT_PATH"), resolve=True)
+    if vault_path is None:
+        vault_path = _coerce_path(file_values.get("VAULT_PATH"), base_dir=config_dir, resolve=True)
+
+    database_path = _coerce_path(os.getenv("DATABASE_PATH"))
+    if database_path is None:
+        database_path = _coerce_path(file_values.get("DATABASE_PATH"), base_dir=config_dir)
+
     return Settings(
-        vault_path=Path(vault_value).expanduser().resolve() if vault_value else None,
-        database_path=Path(db_value).expanduser() if db_value else DEFAULT_DATABASE_PATH,
+        vault_path=vault_path,
+        database_path=database_path or DEFAULT_DATABASE_PATH,
         embedding_model_name=model_value or DEFAULT_EMBEDDING_MODEL_NAME,
         top_k=int(top_k_value) if top_k_value is not None else DEFAULT_TOP_K,
         enable_llm_synthesis=_parse_bool(enable_value, DEFAULT_ENABLE_LLM_SYNTHESIS),

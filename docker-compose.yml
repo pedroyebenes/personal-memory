@@ -1,0 +1,11 @@
+services:
+  personal-memory:
+    build: .
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./config.json:/app/config.json
+    command: ["personal-memory", "--config", "/app/config.json", "web", "--host", "0.0.0.0", "--port", "8000"]

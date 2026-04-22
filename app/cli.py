@@ -50,7 +50,7 @@ def _resolve_vault_arg(cli_value: str | None, config_value: Path | None) -> Path
         return Path(cli_value).expanduser().resolve()
     if config_value:
         return config_value
-    raise SystemExit("Vault path must be provided via --vault or VAULT_PATH.")
+    raise SystemExit("Vault path must be provided via --vault, config.json, or VAULT_PATH.")
 
 
 def main() -> None:

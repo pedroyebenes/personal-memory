@@ -18,8 +18,9 @@ Local-first personal memory system for a single Obsidian vault.
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+mkdir -p data/vault
 personal-memory init-db
-personal-memory ingest --vault /path/to/vault
+personal-memory ingest
 personal-memory search --query "topic"
 personal-memory ask --query "What do my notes say about topic?"
 personal-memory web
@@ -29,7 +30,29 @@ Then open `http://127.0.0.1:8000` in your browser locally, or `http://<your-lan-
 
 ## Configuration
 
-Configuration can be set with environment variables:
+The app now defaults to a repo-local `config.json` file. Edit that file before running the app:
+
+```json
+{
+  "VAULT_PATH": "./data/vault",
+  "DATABASE_PATH": "./data/cache/memory.sqlite3",
+  "EMBEDDING_MODEL_NAME": "sentence-transformers/all-MiniLM-L6-v2",
+  "TOP_K": 5,
+  "ENABLE_LLM_SYNTHESIS": false,
+  "ENABLE_QUERY_REWRITE": false,
+  "LLM_PROVIDER": "ollama",
+  "SYNTHESIS_MODEL_NAME": "gemma3",
+  "OPENAI_API_KEY": null,
+  "OPENAI_BASE_URL": "https://api.openai.com/v1",
+  "GEMINI_API_KEY": null,
+  "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+  "OLLAMA_BASE_URL": "http://localhost:11434/api"
+}
+```
+
+By default the repo expects your notes at `./data/vault` and stores SQLite data at `./data/cache/memory.sqlite3`.
+
+You can still override any value with environment variables when needed:
 
 - `VAULT_PATH`
 - `DATABASE_PATH`
@@ -46,6 +69,47 @@ Configuration can be set with environment variables:
 - `OLLAMA_BASE_URL`
 
 Defaults keep the system local-only. LLM synthesis is disabled in V1.
+
+## Docker Compose
+
+This repo includes a Compose setup similar to the one in `../../tasks`.
+
+Build and start the web app:
+
+```bash
+docker compose up --build
+# or
+docker-compose up --build
+```
+
+Run in the background:
+
+```bash
+docker compose up -d
+# or
+docker-compose up -d
+```
+
+Stop:
+
+```bash
+docker compose down
+# or
+docker-compose down
+```
+
+The web UI is available at `http://localhost:8000`.
+
+Compose mounts:
+
+- `./app` into the container for code changes
+- `./data` for the SQLite database and local vault directory
+- `./config.json` as the runtime configuration file
+
+If your Obsidian vault lives somewhere else, either:
+
+- edit `VAULT_PATH` in `config.json`
+- or replace `./data/vault` with a symlink to your real vault
 
 ## Optional LLM Synthesis
 

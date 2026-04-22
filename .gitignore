@@ -9,3 +9,4 @@ __pycache__/
 
 data/cache/*.sqlite3
 data/cache/*.db
+config.local.json

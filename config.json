@@ -1,0 +1,15 @@
+{
+  "VAULT_PATH": "./data/vault",
+  "DATABASE_PATH": "./data/cache/memory.sqlite3",
+  "EMBEDDING_MODEL_NAME": "sentence-transformers/all-MiniLM-L6-v2",
+  "TOP_K": 5,
+  "ENABLE_LLM_SYNTHESIS": false,
+  "ENABLE_QUERY_REWRITE": false,
+  "LLM_PROVIDER": "ollama",
+  "SYNTHESIS_MODEL_NAME": "gemma3",
+  "OPENAI_API_KEY": null,
+  "OPENAI_BASE_URL": "https://api.openai.com/v1",
+  "GEMINI_API_KEY": null,
+  "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+  "OLLAMA_BASE_URL": "http://localhost:11434/api"
+}
