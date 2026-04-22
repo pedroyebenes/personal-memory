@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -239,6 +239,43 @@ HTML_PAGE = """<!doctype html>
         background: rgba(255, 255, 255, 0.82);
       }
 
+      .inline-form select,
+      .inline-form label {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        padding: 12px 14px;
+        font: inherit;
+        background: rgba(255, 255, 255, 0.82);
+        color: inherit;
+      }
+
+      .inline-form label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .inline-form input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
+
+      .warning-box {
+        display: grid;
+        gap: 8px;
+      }
+
+      .warning-item {
+        padding: 10px 12px;
+        background: rgba(217, 119, 6, 0.12);
+        border-radius: 14px;
+        border: 1px solid rgba(180, 83, 9, 0.18);
+        color: #7c3b07;
+        font-size: 0.92rem;
+        line-height: 1.45;
+      }
+
       .empty {
         color: var(--muted);
         font-style: italic;
@@ -273,6 +310,19 @@ HTML_PAGE = """<!doctype html>
               <div class="body">Ask about your indexed notes. Results stay local and each answer includes sources.</div>
             </div>
           </div>
+          <form id="llm-form" class="tool-row" style="padding: 0 4px 16px;">
+            <div class="inline-form">
+              <select id="llm-provider">
+                <option value="ollama">Ollama</option>
+                <option value="gemini">Gemini</option>
+                <option value="openai">OpenAI</option>
+              </select>
+              <label>
+                <input id="use-llm" type="checkbox">
+                Use LLM synthesis for answers
+              </label>
+            </div>
+          </form>
           <form id="chat-form" class="composer">
             <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
             <button id="send-button" type="submit">Ask</button>
@@ -288,6 +338,11 @@ HTML_PAGE = """<!doctype html>
           <section class="card">
             <h2>Latest Sources</h2>
             <div id="sources" class="sources empty">No answer yet.</div>
+          </section>
+
+          <section class="card">
+            <h2>Warnings</h2>
+            <div id="warnings" class="warning-box empty">No warnings.</div>
           </section>
 
           <section class="card">
@@ -309,10 +364,13 @@ HTML_PAGE = """<!doctype html>
       const sendButton = document.getElementById("send-button");
       const stats = document.getElementById("stats");
       const sources = document.getElementById("sources");
+      const warnings = document.getElementById("warnings");
       const searchForm = document.getElementById("search-form");
       const searchQueryInput = document.getElementById("search-query");
       const searchButton = document.getElementById("search-button");
       const searchResults = document.getElementById("search-results");
+      const useLlmInput = document.getElementById("use-llm");
+      const providerSelect = document.getElementById("llm-provider");
 
       function appendMessage(role, text) {
         const item = document.createElement("div");
@@ -383,6 +441,22 @@ HTML_PAGE = """<!doctype html>
         }
       }
 
+      function renderWarnings(items) {
+        if (!items || !items.length) {
+          warnings.className = "warning-box empty";
+          warnings.textContent = "No warnings.";
+          return;
+        }
+        warnings.className = "warning-box";
+        warnings.innerHTML = "";
+        for (const item of items) {
+          const row = document.createElement("div");
+          row.className = "warning-item";
+          row.textContent = item;
+          warnings.appendChild(row);
+        }
+      }
+
       async function loadStatus() {
         const response = await fetch("/api/status");
         const payload = await response.json();
@@ -401,13 +475,19 @@ HTML_PAGE = """<!doctype html>
           const response = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query }),
+            body: JSON.stringify({
+              query,
+              use_llm: useLlmInput.checked,
+              provider: providerSelect.value,
+            }),
           });
           const payload = await response.json();
           appendMessage("assistant", payload.answer);
           renderSources(payload.sources || []);
+          renderWarnings(payload.warnings || []);
         } catch (error) {
           appendMessage("assistant", `Request failed: ${error}`);
+          renderWarnings([`Request failed: ${error}`]);
         } finally {
           sendButton.disabled = false;
         }
@@ -431,6 +511,7 @@ HTML_PAGE = """<!doctype html>
       });
 
       loadStatus();
+      providerSelect.value = "ollama";
     </script>
   </body>
 </html>
@@ -479,12 +560,19 @@ def serve_web(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> 
                 return
 
             top_k = payload.get("top_k", settings.top_k)
+            provider = str(payload.get("provider", settings.llm_provider)).strip().lower() or settings.llm_provider
+            use_llm_raw = payload.get("use_llm", settings.enable_llm_synthesis)
             try:
                 top_k_value = max(1, int(top_k))
             except (TypeError, ValueError):
                 top_k_value = settings.top_k
+            use_llm = bool(use_llm_raw)
 
-            response = self._with_connection(lambda conn: answer_question(conn, query, settings, top_k=top_k_value))
+            request_settings = replace(settings, llm_provider=provider)
+
+            response = self._with_connection(
+                lambda conn: answer_question(conn, query, request_settings, top_k=top_k_value, use_llm=use_llm)
+            )
             self._send_json(response)
 
         def log_message(self, format: str, *args: Any) -> None:
