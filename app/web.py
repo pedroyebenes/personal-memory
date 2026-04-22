@@ -543,7 +543,7 @@ HTML_PAGE = """<!doctype html>
 """
 
 
-def serve_web(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> None:
+def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> None:
     class Handler(BaseHTTPRequestHandler):
         server_version = "PersonalMemoryHTTP/0.1"
 
@@ -646,5 +646,11 @@ def serve_web(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> 
             self.wfile.write(encoded)
 
     with ThreadingHTTPServer((host, port), Handler) as server:
-        print(f"Serving Personal Memory on http://{host}:{port}")
+        if host == "0.0.0.0":
+            print(
+                "Serving Personal Memory on all interfaces "
+                f"(local: http://127.0.0.1:{port}, LAN: http://<your-lan-ip>:{port})"
+            )
+        else:
+            print(f"Serving Personal Memory on http://{host}:{port}")
         server.serve_forever()

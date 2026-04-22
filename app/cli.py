@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("--rewrite-query", action="store_true")
 
     web_parser = subparsers.add_parser("web")
-    web_parser.add_argument("--host", default="127.0.0.1")
+    web_parser.add_argument("--host", default="0.0.0.0")
     web_parser.add_argument("--port", type=int, default=8000)
     return parser
 
