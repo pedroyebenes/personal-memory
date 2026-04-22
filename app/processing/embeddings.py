@@ -4,18 +4,25 @@ from functools import lru_cache
 from math import sqrt
 
 from app.util.hashing import sha256_text
+from app.util.logging import get_logger
 
 try:
     from sentence_transformers import SentenceTransformer
 except Exception:  # pragma: no cover - fallback when dependency is unavailable
     SentenceTransformer = None  # type: ignore[assignment]
 
+LOGGER = get_logger(__name__)
+
 
 @lru_cache(maxsize=4)
 def _load_model(model_name: str):
     if SentenceTransformer is None:
         return None
-    return SentenceTransformer(model_name)
+    try:
+        return SentenceTransformer(model_name)
+    except Exception as exc:  # pragma: no cover - network/cache/environment dependent
+        LOGGER.warning("Falling back to deterministic embeddings for %s: %s", model_name, exc)
+        return None
 
 
 def _fallback_embedding(text: str, dimensions: int = 32) -> list[float]:

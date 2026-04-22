@@ -3,19 +3,13 @@ from __future__ import annotations
 import sqlite3
 
 from app.config import Settings
+from app.retrieval.llm import LLMConfigurationError, synthesize_answer
 from app.retrieval.hybrid_search import hybrid_search
 
 
-def answer_question(connection: sqlite3.Connection, query: str, settings: Settings, top_k: int = 5) -> dict[str, object]:
-    results = hybrid_search(connection, query, settings, top_k=top_k)
-    if not results:
-        return {"question": query, "answer": "No relevant evidence found.", "sources": []}
-
-    evidence_lines = []
+def _build_sources(results) -> list[dict[str, object]]:
     sources = []
     for result in results:
-        section = f" [{result.section_title}]" if result.section_title else ""
-        evidence_lines.append(f"- {result.document_title}{section}: {result.snippet}")
         sources.append(
             {
                 "document_title": result.document_title,
@@ -26,6 +20,67 @@ def answer_question(connection: sqlite3.Connection, query: str, settings: Settin
                 "snippet": result.snippet,
             }
         )
+    return sources
 
-    answer = "Relevant evidence:\n" + "\n".join(evidence_lines)
-    return {"question": query, "answer": answer, "sources": sources}
+
+def _build_extractive_answer(results) -> str:
+    evidence_lines = []
+    for result in results:
+        section = f" [{result.section_title}]" if result.section_title else ""
+        evidence_lines.append(f"- {result.document_title}{section}: {result.snippet}")
+    return "Relevant evidence:\n" + "\n".join(evidence_lines)
+
+
+def _evidence_is_sufficient(results) -> bool:
+    if not results:
+        return False
+    top_score = results[0].final_score
+    return top_score >= 0.2 or len(results) >= 2
+
+
+def answer_question(
+    connection: sqlite3.Connection,
+    query: str,
+    settings: Settings,
+    top_k: int = 5,
+    use_llm: bool | None = None,
+) -> dict[str, object]:
+    results = hybrid_search(connection, query, settings, top_k=top_k)
+    if not results:
+        return {
+            "question": query,
+            "answer": "No relevant evidence found.",
+            "sources": [],
+            "answer_mode": "extractive",
+            "warnings": ["retrieval returned no evidence"],
+        }
+
+    sources = _build_sources(results)
+    warnings: list[str] = []
+    should_use_llm = settings.enable_llm_synthesis if use_llm is None else use_llm
+    if should_use_llm:
+        if _evidence_is_sufficient(results):
+            try:
+                answer = synthesize_answer(query, sources, settings)
+                return {
+                    "question": query,
+                    "answer": answer,
+                    "sources": sources,
+                    "answer_mode": "llm_synthesis",
+                    "model": settings.synthesis_model_name,
+                    "warnings": warnings,
+                }
+            except LLMConfigurationError as exc:
+                warnings.append(str(exc))
+            except RuntimeError as exc:
+                warnings.append(f"LLM synthesis failed: {exc}")
+        else:
+            warnings.append("evidence too weak for LLM synthesis; returned extractive answer instead")
+
+    return {
+        "question": query,
+        "answer": _build_extractive_answer(results),
+        "sources": sources,
+        "answer_mode": "extractive",
+        "warnings": warnings,
+    }

@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser = subparsers.add_parser("ask")
     ask_parser.add_argument("--query", required=True)
     ask_parser.add_argument("--top-k", type=int)
+    ask_parser.add_argument("--use-llm", action="store_true")
 
     web_parser = subparsers.add_parser("web")
     web_parser.add_argument("--host", default="127.0.0.1")
@@ -82,7 +83,13 @@ def main() -> None:
         return
 
     if args.command == "ask":
-        response = answer_question(connection, args.query, settings, top_k=args.top_k or settings.top_k)
+        response = answer_question(
+            connection,
+            args.query,
+            settings,
+            top_k=args.top_k or settings.top_k,
+            use_llm=args.use_llm or None,
+        )
         print(json.dumps(response, indent=2))
         return
 

@@ -37,8 +37,35 @@ Configuration can be set with environment variables:
 - `TOP_K`
 - `ENABLE_LLM_SYNTHESIS`
 - `SYNTHESIS_MODEL_NAME`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
 
 Defaults keep the system local-only. LLM synthesis is disabled in V1.
+
+## Optional LLM Synthesis
+
+`ask` can optionally synthesize a cleaner answer from the retrieved evidence while keeping sources attached.
+
+Set:
+
+```bash
+export ENABLE_LLM_SYNTHESIS=true
+export OPENAI_API_KEY=...
+export SYNTHESIS_MODEL_NAME=gpt-5-mini
+```
+
+Then run:
+
+```bash
+personal-memory ask --query "What did I decide about retrieval?" --use-llm
+```
+
+Behavior:
+
+- the system still retrieves sources locally first
+- the LLM only sees the selected snippets
+- the answer is expected to cite sources like `[Source 1]`
+- if evidence is weak or the API is not configured, the system falls back to extractive output
 
 ## Web Chat
 
