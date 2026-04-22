@@ -67,6 +67,7 @@ def answer_question(
                     "answer": answer,
                     "sources": sources,
                     "answer_mode": "llm_synthesis",
+                    "provider": settings.llm_provider,
                     "model": settings.synthesis_model_name,
                     "warnings": warnings,
                 }
