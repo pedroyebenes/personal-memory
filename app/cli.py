@@ -10,6 +10,7 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault, reindex_vault, status_summary
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
+from app.retrieval.query_rewrite import resolve_retrieval_query
 from app.web import serve_web
 
 
@@ -30,11 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("--query", required=True)
     search_parser.add_argument("--top-k", type=int)
+    search_parser.add_argument("--rewrite-query", action="store_true")
 
     ask_parser = subparsers.add_parser("ask")
     ask_parser.add_argument("--query", required=True)
     ask_parser.add_argument("--top-k", type=int)
     ask_parser.add_argument("--use-llm", action="store_true")
+    ask_parser.add_argument("--rewrite-query", action="store_true")
 
     web_parser = subparsers.add_parser("web")
     web_parser.add_argument("--host", default="127.0.0.1")
@@ -78,8 +81,23 @@ def main() -> None:
         return
 
     if args.command == "search":
-        results = hybrid_search(connection, args.query, settings, top_k=args.top_k or settings.top_k)
-        print(json.dumps([asdict(result) for result in results], indent=2))
+        retrieval_query, warnings = resolve_retrieval_query(
+            args.query,
+            settings,
+            use_query_rewrite=args.rewrite_query or None,
+        )
+        results = hybrid_search(connection, retrieval_query, settings, top_k=args.top_k or settings.top_k)
+        print(
+            json.dumps(
+                {
+                    "query": args.query,
+                    "retrieval_query": retrieval_query,
+                    "warnings": warnings,
+                    "results": [asdict(result) for result in results],
+                },
+                indent=2,
+            )
+        )
         return
 
     if args.command == "ask":
@@ -89,6 +107,7 @@ def main() -> None:
             settings,
             top_k=args.top_k or settings.top_k,
             use_llm=args.use_llm or None,
+            use_query_rewrite=args.rewrite_query or None,
         )
         print(json.dumps(response, indent=2))
         return

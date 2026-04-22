@@ -5,6 +5,7 @@ import sqlite3
 from app.config import Settings
 from app.retrieval.llm import LLMConfigurationError, synthesize_answer
 from app.retrieval.hybrid_search import hybrid_search
+from app.retrieval.query_rewrite import resolve_retrieval_query
 
 
 def _build_sources(results) -> list[dict[str, object]]:
@@ -44,11 +45,14 @@ def answer_question(
     settings: Settings,
     top_k: int = 5,
     use_llm: bool | None = None,
+    use_query_rewrite: bool | None = None,
 ) -> dict[str, object]:
-    results = hybrid_search(connection, query, settings, top_k=top_k)
+    retrieval_query, warnings = resolve_retrieval_query(query, settings, use_query_rewrite=use_query_rewrite)
+    results = hybrid_search(connection, retrieval_query, settings, top_k=top_k)
     if not results:
         return {
             "question": query,
+            "retrieval_query": retrieval_query,
             "answer": "No relevant evidence found.",
             "sources": [],
             "answer_mode": "extractive",
@@ -56,7 +60,6 @@ def answer_question(
         }
 
     sources = _build_sources(results)
-    warnings: list[str] = []
     should_use_llm = settings.enable_llm_synthesis if use_llm is None else use_llm
     if should_use_llm:
         if _evidence_is_sufficient(results):
@@ -64,6 +67,7 @@ def answer_question(
                 answer = synthesize_answer(query, sources, settings)
                 return {
                     "question": query,
+                    "retrieval_query": retrieval_query,
                     "answer": answer,
                     "sources": sources,
                     "answer_mode": "llm_synthesis",
@@ -80,6 +84,7 @@ def answer_question(
 
     return {
         "question": query,
+        "retrieval_query": retrieval_query,
         "answer": _build_extractive_answer(results),
         "sources": sources,
         "answer_mode": "extractive",

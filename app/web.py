@@ -321,6 +321,10 @@ HTML_PAGE = """<!doctype html>
                 <input id="use-llm" type="checkbox">
                 Use LLM synthesis for answers
               </label>
+              <label>
+                <input id="rewrite-query" type="checkbox">
+                Rewrite natural-language query before retrieval
+              </label>
             </div>
           </form>
           <form id="chat-form" class="composer">
@@ -338,6 +342,11 @@ HTML_PAGE = """<!doctype html>
           <section class="card">
             <h2>Latest Sources</h2>
             <div id="sources" class="sources empty">No answer yet.</div>
+          </section>
+
+          <section class="card">
+            <h2>Retrieval Query</h2>
+            <div id="retrieval-query" class="sources empty">No query yet.</div>
           </section>
 
           <section class="card">
@@ -364,12 +373,14 @@ HTML_PAGE = """<!doctype html>
       const sendButton = document.getElementById("send-button");
       const stats = document.getElementById("stats");
       const sources = document.getElementById("sources");
+      const retrievalQuery = document.getElementById("retrieval-query");
       const warnings = document.getElementById("warnings");
       const searchForm = document.getElementById("search-form");
       const searchQueryInput = document.getElementById("search-query");
       const searchButton = document.getElementById("search-button");
       const searchResults = document.getElementById("search-results");
       const useLlmInput = document.getElementById("use-llm");
+      const rewriteQueryInput = document.getElementById("rewrite-query");
       const providerSelect = document.getElementById("llm-provider");
 
       function appendMessage(role, text) {
@@ -457,6 +468,16 @@ HTML_PAGE = """<!doctype html>
         }
       }
 
+      function renderRetrievalQuery(value) {
+        if (!value) {
+          retrievalQuery.className = "sources empty";
+          retrievalQuery.textContent = "No query yet.";
+          return;
+        }
+        retrievalQuery.className = "sources";
+        retrievalQuery.innerHTML = `<div class="source"><div class="source-meta">${value}</div></div>`;
+      }
+
       async function loadStatus() {
         const response = await fetch("/api/status");
         const payload = await response.json();
@@ -478,15 +499,18 @@ HTML_PAGE = """<!doctype html>
             body: JSON.stringify({
               query,
               use_llm: useLlmInput.checked,
+              rewrite_query: rewriteQueryInput.checked,
               provider: providerSelect.value,
             }),
           });
           const payload = await response.json();
           appendMessage("assistant", payload.answer);
           renderSources(payload.sources || []);
+          renderRetrievalQuery(payload.retrieval_query || query);
           renderWarnings(payload.warnings || []);
         } catch (error) {
           appendMessage("assistant", `Request failed: ${error}`);
+          renderRetrievalQuery("");
           renderWarnings([`Request failed: ${error}`]);
         } finally {
           sendButton.disabled = false;
@@ -512,6 +536,7 @@ HTML_PAGE = """<!doctype html>
 
       loadStatus();
       providerSelect.value = "ollama";
+      renderRetrievalQuery("");
     </script>
   </body>
 </html>
@@ -562,16 +587,25 @@ def serve_web(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> 
             top_k = payload.get("top_k", settings.top_k)
             provider = str(payload.get("provider", settings.llm_provider)).strip().lower() or settings.llm_provider
             use_llm_raw = payload.get("use_llm", settings.enable_llm_synthesis)
+            rewrite_query_raw = payload.get("rewrite_query", settings.enable_query_rewrite)
             try:
                 top_k_value = max(1, int(top_k))
             except (TypeError, ValueError):
                 top_k_value = settings.top_k
             use_llm = bool(use_llm_raw)
+            use_query_rewrite = bool(rewrite_query_raw)
 
             request_settings = replace(settings, llm_provider=provider)
 
             response = self._with_connection(
-                lambda conn: answer_question(conn, query, request_settings, top_k=top_k_value, use_llm=use_llm)
+                lambda conn: answer_question(
+                    conn,
+                    query,
+                    request_settings,
+                    top_k=top_k_value,
+                    use_llm=use_llm,
+                    use_query_rewrite=use_query_rewrite,
+                )
             )
             self._send_json(response)
 

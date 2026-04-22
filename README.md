@@ -36,6 +36,7 @@ Configuration can be set with environment variables:
 - `EMBEDDING_MODEL_NAME`
 - `TOP_K`
 - `ENABLE_LLM_SYNTHESIS`
+- `ENABLE_QUERY_REWRITE`
 - `LLM_PROVIDER`
 - `SYNTHESIS_MODEL_NAME`
 - `OPENAI_API_KEY`
@@ -70,6 +71,27 @@ Behavior:
 - the LLM only sees the selected snippets
 - the answer is expected to cite sources like `[Source 1]`
 - if evidence is weak or the API is not configured, the system falls back to extractive output
+
+## Optional Query Rewriting
+
+Query rewriting is a separate feature from answer synthesis.
+
+- Without it, retrieval uses your original query exactly.
+- With it, the configured LLM provider rewrites your natural-language question into a tighter retrieval query first.
+- The final response includes `retrieval_query` so you can compare what was actually used.
+
+CLI examples:
+
+```bash
+# Old behavior
+personal-memory search --query "what did I write about local models?"
+
+# New behavior
+personal-memory search --query "what did I write about local models?" --rewrite-query
+
+# Combine rewrite + synthesized answer
+personal-memory ask --query "what did I write about local models?" --rewrite-query --use-llm
+```
 
 Provider-specific configuration:
 
@@ -109,5 +131,6 @@ The chat page now includes:
 
 - an `Ollama` / `Gemini` / `OpenAI` provider selector
 - a `Use LLM synthesis for answers` toggle
+- a `Rewrite natural-language query before retrieval` toggle
 
-Those controls apply per request. If the selected provider is unavailable or unconfigured, the app falls back to extractive output and shows the warning in the sidebar.
+Those controls apply per request. If the selected provider is unavailable or unconfigured, the app falls back to the original retrieval path and shows the warning in the sidebar.
