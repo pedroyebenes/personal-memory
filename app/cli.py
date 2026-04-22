@@ -10,6 +10,7 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault, reindex_vault, status_summary
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
+from app.web import serve_web
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser = subparsers.add_parser("ask")
     ask_parser.add_argument("--query", required=True)
     ask_parser.add_argument("--top-k", type=int)
+
+    web_parser = subparsers.add_parser("web")
+    web_parser.add_argument("--host", default="127.0.0.1")
+    web_parser.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -79,6 +84,11 @@ def main() -> None:
     if args.command == "ask":
         response = answer_question(connection, args.query, settings, top_k=args.top_k or settings.top_k)
         print(json.dumps(response, indent=2))
+        return
+
+    if args.command == "web":
+        connection.close()
+        serve_web(settings, host=args.host, port=args.port)
         return
 
     raise SystemExit(f"Unknown command: {args.command}")
