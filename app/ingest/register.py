@@ -51,6 +51,17 @@ def _record_run(
     return run_id
 
 
+def _prune_documents_not_in_vault(connection: sqlite3.Connection, current_paths: set[str]) -> int:
+    rows = connection.execute("SELECT id, source_path FROM documents").fetchall()
+    stale_ids = [int(row["id"]) for row in rows if row["source_path"] not in current_paths]
+    if not stale_ids:
+        return 0
+    connection.executemany("DELETE FROM documents WHERE id = ?", [(document_id,) for document_id in stale_ids])
+    connection.commit()
+    LOGGER.info("Pruned %d stale documents from the index", len(stale_ids))
+    return len(stale_ids)
+
+
 def _upsert_document(
     connection: sqlite3.Connection,
     parsed: ParsedDocument,
@@ -198,8 +209,11 @@ def _ingest_single_document(connection: sqlite3.Connection, path: Path, settings
 
 def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Settings) -> dict[str, object]:
     run_id = _record_run(connection, "ingest", vault_path, "running")
+    markdown_paths = scan_markdown_files(vault_path)
+    current_paths = {str(path) for path in markdown_paths}
+    pruned = _prune_documents_not_in_vault(connection, current_paths)
     counts = {"indexed": 0, "skipped": 0}
-    for path in scan_markdown_files(vault_path):
+    for path in markdown_paths:
         status, _ = _ingest_single_document(connection, path, settings)
         counts[status] += 1
     _record_run(connection, "ingest", vault_path, "completed", counts["indexed"], run_id=run_id)
@@ -208,6 +222,7 @@ def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Set
         "vault_path": str(vault_path),
         "indexed": counts["indexed"],
         "skipped": counts["skipped"],
+        "pruned": pruned,
     }
 
 
@@ -216,10 +231,14 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
     connection.execute("DELETE FROM embeddings")
     connection.execute("DELETE FROM chunks_fts")
     connection.execute("DELETE FROM chunks")
+    connection.execute("DELETE FROM document_tags")
+    connection.execute("DELETE FROM document_aliases")
+    connection.execute("DELETE FROM documents")
     connection.commit()
 
+    markdown_paths = scan_markdown_files(vault_path)
     indexed = 0
-    for path in scan_markdown_files(vault_path):
+    for path in markdown_paths:
         parsed = parse_markdown_file(path)
         content_hash = sha256_text(parsed.raw_text)
         document_id = _upsert_document(connection, parsed, content_hash, utc_now_iso())
@@ -229,7 +248,7 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
             _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
         indexed += 1
     _record_run(connection, "reindex", vault_path, "completed", indexed, run_id=run_id)
-    return {"run_id": run_id, "vault_path": str(vault_path), "indexed": indexed, "skipped": 0}
+    return {"run_id": run_id, "vault_path": str(vault_path), "indexed": indexed, "skipped": 0, "pruned": 0}
 
 
 def status_summary(connection: sqlite3.Connection) -> dict[str, object]:
