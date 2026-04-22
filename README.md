@@ -25,7 +25,7 @@ personal-memory ask --query "What do my notes say about topic?"
 personal-memory web
 ```
 
-Then open `http://127.0.0.1:8000` in your browser.
+Then open `http://127.0.0.1:8000` in your browser locally, or `http://<your-lan-ip>:8000` from another device on your LAN.
 
 ## Configuration
 
@@ -102,7 +102,7 @@ The web UI is a thin local wrapper around the existing backend. It exposes:
 Run it with:
 
 ```bash
-personal-memory web --host 127.0.0.1 --port 8000
+personal-memory web --host 0.0.0.0 --port 8000
 ```
 
 The chat page now includes:
