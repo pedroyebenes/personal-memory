@@ -2,7 +2,7 @@
 
 This project is a local-first personal memory system designed for a single user with one Obsidian vault as the source of truth.
 
-The V1 goal is to make Markdown notes queryable through a simple CLI while preserving provenance. The system ingests notes into SQLite, normalizes and chunks their content, generates local embeddings, and supports keyword, semantic, and hybrid retrieval. It can also answer questions by returning evidence-backed output built from the most relevant chunks.
+The current goal is to make Markdown notes queryable through both a simple CLI and a lightweight local web UI while preserving provenance. The system ingests notes into SQLite, normalizes and chunks their content, generates local embeddings, and supports keyword, semantic, and hybrid retrieval. It can answer questions with either extractive evidence-backed output or optional LLM synthesis grounded only in the retrieved chunks.
 
 ## What The Project Does
 
@@ -22,7 +22,10 @@ The current implementation does the following:
 10. Supports keyword search through SQLite FTS5.
 11. Supports semantic search by embedding the query and comparing it to stored chunk embeddings in Python.
 12. Combines keyword and semantic scores into a hybrid ranking.
-13. Returns grounded search and question-answering results with source provenance.
+13. Supports optional query rewriting through the configured LLM provider.
+14. Supports grounded answer synthesis through Ollama, OpenAI, Gemini, or NVIDIA.
+15. Exposes the same retrieval pipeline through a local web UI, including status, search, chat, and index refresh.
+16. Returns grounded search and question-answering results with source provenance.
 
 ## Why It Exists
 
@@ -34,7 +37,7 @@ The project is built around a few practical constraints:
 - Retrieval results should always point back to the exact note chunks they came from.
 - The system should be inspectable and easy to debug.
 
-This means the implementation avoids cloud dependencies, vector databases, background workers, and UI complexity in V1.
+This means the implementation still avoids vector databases and background workers, while allowing optional cloud-hosted LLM providers when the user explicitly configures them.
 
 ## Current Architecture
 
@@ -51,9 +54,13 @@ Supported settings:
 - `EMBEDDING_MODEL_NAME`
 - `TOP_K`
 - `ENABLE_LLM_SYNTHESIS`
-- `SYNTHESIS_MODEL_NAME`
+- `ENABLE_QUERY_REWRITE`
+- `LLM_PROVIDER`
+- `SYNTHESIS_MODEL_NAME` as a global override
+- provider-specific defaults such as `OPENAI_SYNTHESIS_MODEL_NAME`, `GEMINI_SYNTHESIS_MODEL_NAME`, `NVIDIA_SYNTHESIS_MODEL_NAME`, and `OLLAMA_SYNTHESIS_MODEL_NAME`
+- provider credentials and base URLs
 
-In V1, LLM synthesis is intentionally disabled by default.
+LLM synthesis and query rewriting are disabled by default. If `SYNTHESIS_MODEL_NAME` is unset, the system falls back to the model default for the selected provider.
 
 ### `app/db.py` and `app/schema.sql`
 
@@ -83,6 +90,7 @@ This layer is responsible for reading the Obsidian vault.
 
 - `scanner.py` finds Markdown files recursively.
 - `obsidian_parser.py` parses frontmatter, infers titles, extracts tags and aliases, and normalizes note content.
+- frontmatter values are normalized into JSON-safe values before persistence, including YAML dates and datetimes
 
 The parser currently ignores more advanced Obsidian features such as transclusions, task semantics, and Mermaid parsing.
 
@@ -119,9 +127,11 @@ This layer implements the search and QA behavior.
 - `keyword_search.py` runs FTS5 queries against chunk text and titles.
 - `semantic_search.py` compares query embeddings against stored chunk embeddings.
 - `hybrid_search.py` merges those two result sets with weighted scoring.
-- `qa.py` formats the top evidence into a grounded answer structure.
+- `qa.py` formats the top evidence into a grounded answer structure and optionally routes grounded prompts to the configured LLM provider.
+- `llm.py` contains the provider-specific request logic for OpenAI, Gemini, NVIDIA, and Ollama.
+- `query_rewrite.py` optionally rewrites user questions into tighter retrieval queries before hybrid search runs.
 
-The answer is currently extractive rather than generative. That is deliberate: V1 prioritizes provenance and predictable behavior over synthesis.
+The default answer path is still extractive. Optional synthesis is layered on top of retrieval and is constrained to the retrieved evidence snippets.
 
 ## Database Model
 
@@ -199,6 +209,8 @@ The ingestion pipeline works like this:
 
 The `reindex` command is more aggressive: it clears all chunks and embeddings and rebuilds them for the whole vault.
 
+The web UI also exposes an incremental refresh action that runs the same ingestion path as `ingest`.
+
 ## Search Flow
 
 The `search` command uses hybrid retrieval.
@@ -229,13 +241,31 @@ That makes the output inspectable and suitable for downstream tooling.
 
 The `ask` command is built on top of hybrid retrieval.
 
-Instead of trying to fabricate a polished answer, V1 gathers the top chunks and formats them as evidence-backed output:
+Without LLM synthesis, it gathers the top chunks and formats them as evidence-backed output:
 
 - the original question
 - a concise answer section assembled from the best snippets
 - structured sources
 
+With LLM synthesis enabled, the system sends only the selected snippets to the configured provider and asks it to answer using only those sources with inline citations.
+
 Each source includes the document title, file path, chunk id, chunk index, section title, and snippet. That is the provenance guarantee for the current version.
+
+## Web UI
+
+The local web UI wraps the same backend used by the CLI.
+
+It currently provides:
+
+- index status
+- incremental index refresh
+- hybrid search
+- grounded chat
+- per-request provider selection
+- per-request model override in the UI
+- provider availability feedback when required API keys are missing
+
+The UI disables unavailable providers such as OpenAI, Gemini, or NVIDIA when their corresponding API keys are not configured.
 
 ## Embedding Behavior
 
@@ -255,6 +285,7 @@ The CLI currently supports:
 - `reindex --vault PATH`
 - `search --query "..."`
 - `ask --query "..."`
+- `web --host 0.0.0.0 --port 8000`
 
 ### `init-db`
 
