@@ -6,10 +6,16 @@
   "ENABLE_LLM_SYNTHESIS": false,
   "ENABLE_QUERY_REWRITE": false,
   "LLM_PROVIDER": "ollama",
-  "SYNTHESIS_MODEL_NAME": "gemma3",
+  "SYNTHESIS_MODEL_NAME": null,
+  "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
+  "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
+  "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
+  "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e4b-it-q4_K_M",
   "OPENAI_API_KEY": null,
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "GEMINI_API_KEY": null,
   "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+  "NVIDIA_API_KEY": null,
+  "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
   "OLLAMA_BASE_URL": "http://localhost:11434/api"
 }

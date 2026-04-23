@@ -41,16 +41,28 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "ENABLE_LLM_SYNTHESIS": false,
   "ENABLE_QUERY_REWRITE": false,
   "LLM_PROVIDER": "ollama",
-  "SYNTHESIS_MODEL_NAME": "gemma3",
+  "SYNTHESIS_MODEL_NAME": null,
+  "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
+  "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
+  "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
+  "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma3",
   "OPENAI_API_KEY": null,
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "GEMINI_API_KEY": null,
   "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+  "NVIDIA_API_KEY": null,
+  "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
   "OLLAMA_BASE_URL": "http://localhost:11434/api"
 }
 ```
 
 By default the repo expects your notes at `./data/vault` and stores SQLite data at `./data/cache/memory.sqlite3`.
+
+Path resolution depends on how you run the app:
+
+- When running directly on the host, relative paths in `config.json` are resolved relative to the `config.json` file on the host.
+- When running in Docker, `config.json` is read inside the container at `/app/config.json`, so relative paths are resolved relative to `/app` inside the container.
+- In Docker Compose, `VAULT_PATH` is overridden to `/vault`, so the container reads from the mounted host vault instead of the repo-relative default.
 
 You can still override any value with environment variables when needed:
 
@@ -62,10 +74,16 @@ You can still override any value with environment variables when needed:
 - `ENABLE_QUERY_REWRITE`
 - `LLM_PROVIDER`
 - `SYNTHESIS_MODEL_NAME`
+- `OPENAI_SYNTHESIS_MODEL_NAME`
+- `GEMINI_SYNTHESIS_MODEL_NAME`
+- `NVIDIA_SYNTHESIS_MODEL_NAME`
+- `OLLAMA_SYNTHESIS_MODEL_NAME`
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `GEMINI_API_KEY`
 - `GEMINI_BASE_URL`
+- `NVIDIA_API_KEY`
+- `NVIDIA_BASE_URL`
 - `OLLAMA_BASE_URL`
 
 Defaults keep the system local-only. LLM synthesis is disabled in V1.
@@ -103,13 +121,61 @@ The web UI is available at `http://localhost:8000`.
 Compose mounts:
 
 - `./app` into the container for code changes
-- `./data` for the SQLite database and local vault directory
+- `./data` for the SQLite database
+- `${HOST_VAULT_PATH:-./data/vault}` from the host into `/vault` in the container
 - `./config.json` as the runtime configuration file
 
-If your Obsidian vault lives somewhere else, either:
+Compose also sets:
 
-- edit `VAULT_PATH` in `config.json`
-- or replace `./data/vault` with a symlink to your real vault
+- `OLLAMA_BASE_URL=http://host.docker.internal:11434/api` so the container can reach an Ollama server running on your host machine
+- `VAULT_PATH=/vault` so the app reads notes from the mounted host vault
+
+If your Obsidian vault lives outside the repo on the host, point Compose at it when you start the app:
+
+```bash
+HOST_VAULT_PATH="/absolute/path/to/your/vault" docker compose up --build
+```
+
+If you do not set `HOST_VAULT_PATH`, Compose falls back to `./data/vault`.
+
+Examples:
+
+```bash
+# Use a host vault outside the repo
+HOST_VAULT_PATH="$HOME/Documents/Obsidian/MainVault" docker compose up --build
+
+# Use the repo-local sample vault
+docker compose up --build
+```
+
+If you are not using host Ollama, set `OLLAMA_BASE_URL` to the correct reachable endpoint for your setup.
+
+## Indexing
+
+The SQLite schema is initialized automatically when you run the CLI or web app, but note ingestion is not automatic unless you trigger it.
+
+- `personal-memory ingest` performs incremental indexing
+- changed notes are reprocessed
+- unchanged notes are skipped
+- deleted notes are pruned from the index
+
+Use:
+
+```bash
+personal-memory ingest
+```
+
+Or specify the vault explicitly:
+
+```bash
+personal-memory ingest --vault "/absolute/path/to/your/vault"
+```
+
+If you need a full rebuild instead of an incremental refresh, use:
+
+```bash
+personal-memory reindex
+```
 
 ## Optional LLM Synthesis
 
@@ -163,17 +229,23 @@ Provider-specific configuration:
 # Ollama
 export LLM_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://localhost:11434/api
-export SYNTHESIS_MODEL_NAME=gemma3
+export OLLAMA_SYNTHESIS_MODEL_NAME=gemma3
 
 # Gemini
 export LLM_PROVIDER=gemini
 export GEMINI_API_KEY=your_gemini_key
-export SYNTHESIS_MODEL_NAME=gemini-2.5-flash
+export GEMINI_SYNTHESIS_MODEL_NAME=gemini-2.5-flash
+
+# NVIDIA
+export LLM_PROVIDER=nvidia
+export NVIDIA_API_KEY=your_nvidia_api_key
+export NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+export NVIDIA_SYNTHESIS_MODEL_NAME=z-ai/glm-4.7
 
 # OpenAI
 export LLM_PROVIDER=openai
 export OPENAI_API_KEY=your_openai_key
-export SYNTHESIS_MODEL_NAME=gpt-5-mini
+export OPENAI_SYNTHESIS_MODEL_NAME=gpt-5-mini
 ```
 
 ## Web Chat
@@ -183,6 +255,7 @@ The web UI is a thin local wrapper around the existing backend. It exposes:
 - `GET /` for the browser chat page
 - `GET /api/status` for index stats
 - `GET /api/search?query=...` for hybrid search
+- `POST /api/refresh` for incremental index refresh
 - `POST /api/chat` for evidence-backed answers
 
 Run it with:
@@ -193,8 +266,12 @@ personal-memory web --host 0.0.0.0 --port 8000
 
 The chat page now includes:
 
-- an `Ollama` / `Gemini` / `OpenAI` provider selector
+- an `Ollama` / `Gemini` / `NVIDIA` / `OpenAI` provider selector
+- a model textbox next to the provider selector, prefilled from that provider's configured default
 - a `Use LLM synthesis for answers` toggle
 - a `Rewrite natural-language query before retrieval` toggle
+- a `Refresh Index` button that runs incremental ingest against the configured vault path
+
+The `Refresh Index` button runs the same incremental ingest path as `personal-memory ingest`.
 
 Those controls apply per request. If the selected provider is unavailable or unconfigured, the app falls back to the original retrieval path and shows the warning in the sidebar.

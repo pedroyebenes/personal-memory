@@ -1,11 +1,19 @@
 services:
   personal-memory:
     build: .
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/api
+      VAULT_PATH: /vault
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     restart: unless-stopped
     volumes:
       - ./app:/app/app
       - ./data:/app/data
+      - ${HOST_VAULT_PATH:-./data/vault}:/vault:ro
       - ./config.json:/app/config.json
     command: ["personal-memory", "--config", "/app/config.json", "web", "--host", "0.0.0.0", "--port", "8000"]

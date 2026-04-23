@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,18 @@ def infer_title(source_path: Path, frontmatter: dict[str, Any]) -> str:
     return source_path.stem.replace("_", " ").strip()
 
 
+def _json_safe_frontmatter(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_json_safe_frontmatter(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe_frontmatter(item) for key, item in value.items()}
+    return str(value)
+
+
 def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     match = FRONTMATTER_PATTERN.match(text)
     if not match:
@@ -29,7 +42,7 @@ def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     payload = yaml.safe_load(match.group(1)) or {}
     if not isinstance(payload, dict):
         payload = {}
-    return payload, text[match.end():]
+    return _json_safe_frontmatter(payload), text[match.end():]
 
 
 def _normalize_string_list(value: Any) -> list[str]:

@@ -72,7 +72,7 @@ def answer_question(
                     "sources": sources,
                     "answer_mode": "llm_synthesis",
                     "provider": settings.llm_provider,
-                    "model": settings.synthesis_model_name,
+                    "model": settings.get_synthesis_model_name(),
                     "warnings": warnings,
                 }
             except LLMConfigurationError as exc:

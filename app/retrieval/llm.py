@@ -1,13 +1,35 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from urllib import error, request
+from urllib.parse import urlparse
 
 from app.config import Settings
 
 
 class LLMConfigurationError(RuntimeError):
     """Raised when LLM synthesis is requested without usable configuration."""
+
+
+def _running_in_container() -> bool:
+    return Path("/.dockerenv").exists()
+
+
+def _is_localhost_url(url: str) -> bool:
+    hostname = (urlparse(url).hostname or "").strip().lower()
+    return hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def _augment_connection_error(url: str, reason: object) -> str:
+    detail = str(reason)
+    if _running_in_container() and _is_localhost_url(url):
+        return (
+            f"{detail}. The app appears to be running in a container, where localhost points to the "
+            f"container itself. Set OLLAMA_BASE_URL to a host-reachable address such as "
+            f"http://host.docker.internal:11434/api."
+        )
+    return detail
 
 
 def _format_sources(sources: list[dict[str, object]]) -> str:
@@ -44,13 +66,14 @@ def _build_prompt(question: str, sources: list[dict[str, object]]) -> str:
 
 def _generate_text(prompt: str, settings: Settings, system_instruction: str) -> str:
     provider = settings.llm_provider.strip().lower()
+    model_name = settings.get_synthesis_model_name(provider)
     if provider == "openai":
         if not settings.openai_api_key:
             raise LLMConfigurationError("OPENAI_API_KEY is not configured.")
-        if not settings.synthesis_model_name:
+        if not model_name:
             raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
         payload = {
-            "model": settings.synthesis_model_name,
+            "model": model_name,
             "instructions": system_instruction,
             "input": prompt,
         }
@@ -66,11 +89,11 @@ def _generate_text(prompt: str, settings: Settings, system_instruction: str) -> 
     if provider == "gemini":
         if not settings.gemini_api_key:
             raise LLMConfigurationError("GEMINI_API_KEY is not configured.")
-        if not settings.synthesis_model_name:
+        if not model_name:
             raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
         payload = {"contents": [{"parts": [{"text": f"{system_instruction}\n\n{prompt}"}]}]}
         result = _post_json(
-            f"{settings.gemini_base_url.rstrip('/')}/models/{settings.synthesis_model_name}:generateContent",
+            f"{settings.gemini_base_url.rstrip('/')}/models/{model_name}:generateContent",
             {
                 "x-goog-api-key": settings.gemini_api_key,
                 "Content-Type": "application/json",
@@ -78,11 +101,33 @@ def _generate_text(prompt: str, settings: Settings, system_instruction: str) -> 
             payload,
         )
         return _extract_gemini_text(result)
-    if provider == "ollama":
-        if not settings.synthesis_model_name:
+    if provider == "nvidia":
+        if not settings.nvidia_api_key:
+            raise LLMConfigurationError("NVIDIA_API_KEY is not configured.")
+        if not model_name:
             raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
         payload = {
-            "model": settings.synthesis_model_name,
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+        }
+        result = _post_json(
+            settings.nvidia_base_url.rstrip("/") + "/chat/completions",
+            {
+                "Authorization": f"Bearer {settings.nvidia_api_key}",
+                "Content-Type": "application/json",
+            },
+            payload,
+        )
+        return _extract_chat_completions_text(result, provider_name="NVIDIA")
+    if provider == "ollama":
+        if not model_name:
+            raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
+        payload = {
+            "model": model_name,
             "prompt": prompt,
             "system": system_instruction,
             "stream": False,
@@ -109,7 +154,7 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, object]) ->
         message = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"LLM request failed with status {exc.code}: {message}") from exc
     except error.URLError as exc:
-        raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
+        raise RuntimeError(f"LLM request failed: {_augment_connection_error(url, exc.reason)}") from exc
     if not isinstance(result, dict):
         raise RuntimeError("LLM response was not a JSON object.")
     return result
@@ -148,6 +193,31 @@ def _extract_gemini_text(result: dict[str, object]) -> str:
         if texts:
             return "\n".join(texts).strip()
     raise RuntimeError("Gemini API response did not contain text output.")
+
+
+def _extract_chat_completions_text(result: dict[str, object], provider_name: str) -> str:
+    choices = result.get("choices", [])
+    if not isinstance(choices, list):
+        raise RuntimeError(f"{provider_name} API response did not contain choices.")
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message", {})
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        if isinstance(content, list):
+            texts = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text" and item.get("text"):
+                    texts.append(str(item["text"]))
+            if texts:
+                return "\n".join(texts).strip()
+    raise RuntimeError(f"{provider_name} API response did not contain text output.")
 
 
 def synthesize_answer(question: str, sources: list[dict[str, object]], settings: Settings) -> str:

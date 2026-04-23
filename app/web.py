@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.config import Settings
 from app.db import connect, init_db
-from app.ingest.register import status_summary
+from app.ingest.register import ingest_vault, status_summary
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 
@@ -213,6 +213,23 @@ HTML_PAGE = """<!doctype html>
         margin-bottom: 6px;
       }
 
+      .source-path, .search-path {
+        display: inline-block;
+        margin-bottom: 8px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.1);
+        color: #0f5c56;
+        font-size: 0.8rem;
+        font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+        word-break: break-all;
+      }
+
+      .source-snippet, .search-snippet {
+        color: var(--ink);
+        line-height: 1.5;
+      }
+
       .source-meta, .search-meta {
         color: var(--muted);
         font-size: 0.88rem;
@@ -250,6 +267,12 @@ HTML_PAGE = """<!doctype html>
         color: inherit;
       }
 
+      .provider-row {
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+        gap: 10px;
+      }
+
       .inline-form label {
         display: flex;
         align-items: center;
@@ -273,6 +296,16 @@ HTML_PAGE = """<!doctype html>
         border: 1px solid rgba(180, 83, 9, 0.18);
         color: #7c3b07;
         font-size: 0.92rem;
+        line-height: 1.45;
+      }
+
+      .provider-status {
+        padding: 10px 12px;
+        background: rgba(30, 42, 34, 0.06);
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.9rem;
         line-height: 1.45;
       }
 
@@ -312,11 +345,16 @@ HTML_PAGE = """<!doctype html>
           </div>
           <form id="llm-form" class="tool-row" style="padding: 0 4px 16px;">
             <div class="inline-form">
-              <select id="llm-provider">
-                <option value="ollama">Ollama</option>
-                <option value="gemini">Gemini</option>
-                <option value="openai">OpenAI</option>
-              </select>
+              <div class="provider-row">
+                <select id="llm-provider">
+                  <option value="ollama">Ollama</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="nvidia">NVIDIA</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+                <input id="synthesis-model" type="text" placeholder="Model name">
+              </div>
+              <div id="provider-status" class="provider-status">Checking provider availability…</div>
               <label>
                 <input id="use-llm" type="checkbox">
                 Use LLM synthesis for answers
@@ -329,36 +367,39 @@ HTML_PAGE = """<!doctype html>
           </form>
           <form id="chat-form" class="composer">
             <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
-            <button id="send-button" type="submit">Ask</button>
+            <button id="send-button" type="submit">✨ Ask</button>
           </form>
         </div>
 
         <aside class="panel sidebar">
           <section class="card">
-            <h2>Index Status</h2>
+            <h2>📚 Index Status</h2>
+            <form id="refresh-form" class="inline-form" style="margin-bottom: 12px;">
+              <button class="secondary" id="refresh-button" type="submit">🔄 Refresh Index</button>
+            </form>
             <div id="stats" class="stats empty">Loading status…</div>
           </section>
 
           <section class="card">
-            <h2>Latest Sources</h2>
+            <h2>🧾 Latest Sources</h2>
             <div id="sources" class="sources empty">No answer yet.</div>
           </section>
 
           <section class="card">
-            <h2>Retrieval Query</h2>
+            <h2>🧠 Retrieval Query</h2>
             <div id="retrieval-query" class="sources empty">No query yet.</div>
           </section>
 
           <section class="card">
-            <h2>Warnings</h2>
+            <h2>⚠️ Warnings</h2>
             <div id="warnings" class="warning-box empty">No warnings.</div>
           </section>
 
           <section class="card">
-            <h2>Search</h2>
+            <h2>🔎 Search</h2>
             <form id="search-form" class="inline-form">
               <input id="search-query" type="text" placeholder="Keyword or concept">
-              <button class="secondary" id="search-button" type="submit">Search</button>
+              <button class="secondary" id="search-button" type="submit">🔎 Search</button>
             </form>
             <div id="search-results" class="search-results empty">No search results yet.</div>
           </section>
@@ -372,6 +413,8 @@ HTML_PAGE = """<!doctype html>
       const queryInput = document.getElementById("query");
       const sendButton = document.getElementById("send-button");
       const stats = document.getElementById("stats");
+      const refreshForm = document.getElementById("refresh-form");
+      const refreshButton = document.getElementById("refresh-button");
       const sources = document.getElementById("sources");
       const retrievalQuery = document.getElementById("retrieval-query");
       const warnings = document.getElementById("warnings");
@@ -382,6 +425,10 @@ HTML_PAGE = """<!doctype html>
       const useLlmInput = document.getElementById("use-llm");
       const rewriteQueryInput = document.getElementById("rewrite-query");
       const providerSelect = document.getElementById("llm-provider");
+      const synthesisModelInput = document.getElementById("synthesis-model");
+      const providerStatus = document.getElementById("provider-status");
+      let providerDefaults = {};
+      let providerAvailability = {};
 
       function appendMessage(role, text) {
         const item = document.createElement("div");
@@ -393,12 +440,15 @@ HTML_PAGE = """<!doctype html>
       }
 
       function renderStatus(payload) {
+        providerDefaults = payload.provider_defaults || {};
+        providerAvailability = payload.provider_availability || {};
         stats.classList.remove("empty");
         stats.innerHTML = "";
         const entries = [
           ["Documents", payload.documents],
           ["Chunks", payload.chunks],
           ["Embeddings", payload.embeddings],
+          ["Vault", payload.vault_path || "not configured"],
           ["Latest Run", payload.latest_run ? `${payload.latest_run.run_type} (${payload.latest_run.status})` : "none"],
         ];
         for (const [label, value] of entries) {
@@ -407,6 +457,56 @@ HTML_PAGE = """<!doctype html>
           row.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
           stats.appendChild(row);
         }
+        refreshButton.disabled = !payload.refresh_available;
+        syncProviderOptions(payload.llm_provider || "ollama");
+      }
+
+      function syncModelInput() {
+        synthesisModelInput.value = providerDefaults[providerSelect.value] || "";
+      }
+
+      function syncProviderOptions(preferredProvider) {
+        let nextProvider = preferredProvider;
+        for (const option of providerSelect.options) {
+          const availability = providerAvailability[option.value] || { available: true, reason: "" };
+          option.disabled = !availability.available;
+          option.textContent = availability.available
+            ? option.value === "ollama"
+              ? "Ollama"
+              : option.value === "gemini"
+                ? "Gemini"
+                : option.value === "nvidia"
+                  ? "NVIDIA"
+                  : "OpenAI"
+            : `${option.value === "ollama" ? "Ollama" : option.value === "gemini" ? "Gemini" : option.value === "nvidia" ? "NVIDIA" : "OpenAI"} (key missing)`;
+        }
+
+        const preferredAvailability = providerAvailability[nextProvider] || { available: true, reason: "" };
+        if (!preferredAvailability.available) {
+          const firstAvailable = Array.from(providerSelect.options).find((option) => !option.disabled);
+          nextProvider = firstAvailable ? firstAvailable.value : providerSelect.value;
+        }
+        providerSelect.value = nextProvider;
+        syncProviderState();
+      }
+
+      function syncProviderState() {
+        const availability = providerAvailability[providerSelect.value] || { available: true, reason: "" };
+        const providerLabel = providerSelect.options[providerSelect.selectedIndex]?.textContent || providerSelect.value;
+        syncModelInput();
+        if (!availability.available) {
+          useLlmInput.checked = false;
+          useLlmInput.disabled = true;
+          rewriteQueryInput.checked = false;
+          rewriteQueryInput.disabled = true;
+          synthesisModelInput.disabled = true;
+          providerStatus.textContent = `${providerLabel} is unavailable: ${availability.reason}`;
+          return;
+        }
+        useLlmInput.disabled = false;
+        rewriteQueryInput.disabled = false;
+        synthesisModelInput.disabled = false;
+        providerStatus.textContent = `${providerLabel} is available.`;
       }
 
       function renderSources(items) {
@@ -423,8 +523,8 @@ HTML_PAGE = """<!doctype html>
           const section = item.section_title ? ` · ${item.section_title}` : "";
           card.innerHTML = `
             <div class="source-title">${item.document_title}${section}</div>
-            <div class="source-meta">${item.source_path}</div>
-            <div class="source-meta">${item.snippet}</div>
+            <div class="source-path">${item.source_path}</div>
+            <div class="source-snippet">${item.snippet}</div>
           `;
           sources.appendChild(card);
         }
@@ -444,8 +544,8 @@ HTML_PAGE = """<!doctype html>
           const section = item.section_title ? ` · ${item.section_title}` : "";
           card.innerHTML = `
             <div class="search-title">${item.document_title}${section}</div>
-            <div class="search-meta">${item.source_path}</div>
-            <div class="search-meta">${item.snippet}</div>
+            <div class="search-path">${item.source_path}</div>
+            <div class="search-snippet">${item.snippet}</div>
             <div class="search-meta">Final score: ${item.final_score.toFixed(3)}</div>
           `;
           searchResults.appendChild(card);
@@ -484,6 +584,31 @@ HTML_PAGE = """<!doctype html>
         renderStatus(payload);
       }
 
+      refreshForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        refreshButton.disabled = true;
+        try {
+          const response = await fetch("/api/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            renderWarnings([payload.error || "Refresh failed."]);
+            return;
+          }
+          renderWarnings([
+            `Index refresh completed: indexed ${payload.indexed}, skipped ${payload.skipped}, pruned ${payload.pruned}.`,
+          ]);
+          await loadStatus();
+        } catch (error) {
+          renderWarnings([`Refresh failed: ${error}`]);
+        } finally {
+          refreshButton.disabled = false;
+        }
+      });
+
       chatForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const query = queryInput.value.trim();
@@ -501,6 +626,7 @@ HTML_PAGE = """<!doctype html>
               use_llm: useLlmInput.checked,
               rewrite_query: rewriteQueryInput.checked,
               provider: providerSelect.value,
+              model: synthesisModelInput.value.trim(),
             }),
           });
           const payload = await response.json();
@@ -535,7 +661,7 @@ HTML_PAGE = """<!doctype html>
       });
 
       loadStatus();
-      providerSelect.value = "ollama";
+      providerSelect.addEventListener("change", syncProviderState);
       renderRetrievalQuery("");
     </script>
   </body>
@@ -553,7 +679,13 @@ def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> No
                 self._send_html(HTML_PAGE)
                 return
             if parsed.path == "/api/status":
-                self._send_json(self._with_connection(lambda conn: status_summary(conn)))
+                summary = self._with_connection(lambda conn: status_summary(conn))
+                summary["vault_path"] = str(settings.vault_path) if settings.vault_path else None
+                summary["refresh_available"] = settings.vault_path is not None
+                summary["llm_provider"] = settings.llm_provider
+                summary["provider_defaults"] = settings.synthesis_model_defaults()
+                summary["provider_availability"] = settings.provider_availability()
+                self._send_json(summary)
                 return
             if parsed.path == "/api/search":
                 query = parse_qs(parsed.query).get("query", [""])[0].strip()
@@ -573,41 +705,55 @@ def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> No
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
         def do_POST(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            if parsed.path != "/api/chat":
-                self.send_error(HTTPStatus.NOT_FOUND, "Not found")
-                return
-
-            payload = self._read_json_body()
-            query = str(payload.get("query", "")).strip()
-            if not query:
-                self._send_json({"error": "query is required"}, status=HTTPStatus.BAD_REQUEST)
-                return
-
-            top_k = payload.get("top_k", settings.top_k)
-            provider = str(payload.get("provider", settings.llm_provider)).strip().lower() or settings.llm_provider
-            use_llm_raw = payload.get("use_llm", settings.enable_llm_synthesis)
-            rewrite_query_raw = payload.get("rewrite_query", settings.enable_query_rewrite)
             try:
-                top_k_value = max(1, int(top_k))
-            except (TypeError, ValueError):
-                top_k_value = settings.top_k
-            use_llm = bool(use_llm_raw)
-            use_query_rewrite = bool(rewrite_query_raw)
+                parsed = urlparse(self.path)
+                if parsed.path == "/api/refresh":
+                    if settings.vault_path is None:
+                        self._send_json(
+                            {"error": "VAULT_PATH is not configured, so the index cannot be refreshed."},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    summary = self._with_connection(lambda conn: ingest_vault(conn, settings.vault_path, settings))
+                    self._send_json(summary)
+                    return
+                if parsed.path != "/api/chat":
+                    self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+                    return
 
-            request_settings = replace(settings, llm_provider=provider)
+                payload = self._read_json_body()
+                query = str(payload.get("query", "")).strip()
+                if not query:
+                    self._send_json({"error": "query is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
 
-            response = self._with_connection(
-                lambda conn: answer_question(
-                    conn,
-                    query,
-                    request_settings,
-                    top_k=top_k_value,
-                    use_llm=use_llm,
-                    use_query_rewrite=use_query_rewrite,
+                top_k = payload.get("top_k", settings.top_k)
+                provider = str(payload.get("provider", settings.llm_provider)).strip().lower() or settings.llm_provider
+                model = str(payload.get("model", "")).strip() or None
+                use_llm_raw = payload.get("use_llm", settings.enable_llm_synthesis)
+                rewrite_query_raw = payload.get("rewrite_query", settings.enable_query_rewrite)
+                try:
+                    top_k_value = max(1, int(top_k))
+                except (TypeError, ValueError):
+                    top_k_value = settings.top_k
+                use_llm = bool(use_llm_raw)
+                use_query_rewrite = bool(rewrite_query_raw)
+
+                request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
+
+                response = self._with_connection(
+                    lambda conn: answer_question(
+                        conn,
+                        query,
+                        request_settings,
+                        top_k=top_k_value,
+                        use_llm=use_llm,
+                        use_query_rewrite=use_query_rewrite,
+                    )
                 )
-            )
-            self._send_json(response)
+                self._send_json(response)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
         def log_message(self, format: str, *args: Any) -> None:
             return
