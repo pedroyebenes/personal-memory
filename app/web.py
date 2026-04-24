@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import asdict, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,7 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault, status_summary
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
+from app.util.timestamps import utc_now_iso
 
 HTML_PAGE = """<!doctype html>
 <html lang="en">
@@ -679,91 +681,269 @@ HTML_PAGE = """<!doctype html>
 """
 
 
-def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> None:
+class APIError(RuntimeError):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status: HTTPStatus,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status = status
+        self.details = details or {}
+
+
+class RefreshState:
+    def __init__(self) -> None:
+        self._refresh_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._in_progress = False
+        self._started_at: str | None = None
+        self._last_completed_at: str | None = None
+        self._last_result: dict[str, object] | None = None
+
+    def begin(self) -> None:
+        if not self._refresh_lock.acquire(blocking=False):
+            raise APIError(
+                "refresh_in_progress",
+                "A refresh is already running.",
+                status=HTTPStatus.CONFLICT,
+            )
+        with self._state_lock:
+            self._in_progress = True
+            self._started_at = utc_now_iso()
+
+    def finish(self, result: dict[str, object]) -> None:
+        with self._state_lock:
+            self._in_progress = False
+            self._last_completed_at = utc_now_iso()
+            self._last_result = dict(result)
+        self._refresh_lock.release()
+
+    def snapshot(self) -> dict[str, object]:
+        with self._state_lock:
+            return {
+                "in_progress": self._in_progress,
+                "started_at": self._started_at,
+                "last_completed_at": self._last_completed_at,
+                "last_result": self._last_result,
+            }
+
+
+def _success_payload(payload: dict[str, object]) -> dict[str, object]:
+    return {"ok": True, **payload}
+
+
+def _error_payload(error: APIError) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": {
+            "code": error.code,
+            "message": error.message,
+            "details": error.details,
+        },
+    }
+
+
+def _read_bool(payload: dict[str, Any], key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise APIError(
+        "invalid_boolean",
+        f"{key} must be a boolean.",
+        status=HTTPStatus.BAD_REQUEST,
+        details={"field": key},
+    )
+
+
+def _read_top_k(value: object, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        top_k = int(value)
+    except (TypeError, ValueError) as exc:
+        raise APIError(
+            "invalid_top_k",
+            "top_k must be an integer.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": "top_k"},
+        ) from exc
+    if top_k < 1:
+        raise APIError(
+            "invalid_top_k",
+            "top_k must be greater than zero.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": "top_k"},
+        )
+    return top_k
+
+
+def _resolve_provider(settings: Settings, provider_value: object) -> str:
+    provider = str(provider_value or settings.llm_provider).strip().lower() or settings.llm_provider
+    if not settings.is_supported_provider(provider):
+        raise APIError(
+            "invalid_provider",
+            f"Unsupported provider: {provider}",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"provider": provider},
+        )
+    return provider
+
+
+def _validate_provider_request(settings: Settings, provider: str, *, require_provider: bool) -> None:
+    if not require_provider:
+        return
+    availability = settings.provider_availability().get(provider, {"available": False, "reason": "Provider is unavailable."})
+    if not bool(availability.get("available")):
+        raise APIError(
+            "provider_unavailable",
+            str(availability.get("reason") or f"{provider} is unavailable."),
+            status=HTTPStatus.BAD_REQUEST,
+            details={"provider": provider},
+        )
+
+
+def handle_api_get(
+    path: str,
+    settings: Settings,
+    refresh_state: RefreshState,
+    with_connection,
+) -> tuple[HTTPStatus, dict[str, object]]:
+    parsed = urlparse(path)
+    if parsed.path == "/api/status":
+        summary = with_connection(lambda conn: status_summary(conn))
+        summary["vault_path"] = str(settings.vault_path) if settings.vault_path else None
+        summary["refresh_available"] = settings.vault_path is not None
+        summary["refresh_state"] = refresh_state.snapshot()
+        summary["llm_provider"] = settings.llm_provider
+        summary["provider_defaults"] = settings.synthesis_model_defaults()
+        summary["provider_availability"] = settings.provider_availability()
+        summary["config_diagnostics"] = settings.validate()
+        return HTTPStatus.OK, _success_payload(summary)
+    if parsed.path == "/api/search":
+        query = parse_qs(parsed.query).get("query", [""])[0].strip()
+        top_k = _read_top_k(parse_qs(parsed.query).get("top_k", [settings.top_k])[0], settings.top_k)
+        if not query:
+            return HTTPStatus.OK, _success_payload({"results": []})
+        results = with_connection(lambda conn: [asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k)])
+        return HTTPStatus.OK, _success_payload({"results": results})
+    raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
+
+
+def handle_api_post(
+    path: str,
+    payload: dict[str, Any],
+    settings: Settings,
+    refresh_state: RefreshState,
+    with_connection,
+) -> tuple[HTTPStatus, dict[str, object]]:
+    parsed = urlparse(path)
+    if parsed.path == "/api/refresh":
+        if settings.vault_path is None:
+            raise APIError(
+                "vault_not_configured",
+                "VAULT_PATH is not configured, so the index cannot be refreshed.",
+                status=HTTPStatus.BAD_REQUEST,
+            )
+        refresh_state.begin()
+        try:
+            summary = with_connection(lambda conn: ingest_vault(conn, settings.vault_path, settings))
+        except Exception as exc:
+            refresh_state.finish({"status": "failed", "error": str(exc)})
+            raise
+        refresh_state.finish({"status": "completed", **summary})
+        return HTTPStatus.OK, _success_payload(summary)
+    if parsed.path != "/api/chat":
+        raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
+
+    query = str(payload.get("query", "")).strip()
+    if not query:
+        raise APIError(
+            "missing_query",
+            "query is required",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": "query"},
+        )
+
+    top_k_value = _read_top_k(payload.get("top_k"), settings.top_k)
+    provider = _resolve_provider(settings, payload.get("provider", settings.llm_provider))
+    model = str(payload.get("model", "")).strip() or None
+    use_llm = _read_bool(payload, "use_llm", settings.enable_llm_synthesis)
+    use_query_rewrite = _read_bool(payload, "rewrite_query", settings.enable_query_rewrite)
+
+    request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
+    _validate_provider_request(request_settings, provider, require_provider=use_llm or use_query_rewrite)
+
+    response = with_connection(
+        lambda conn: answer_question(
+            conn,
+            query,
+            request_settings,
+            top_k=top_k_value,
+            use_llm=use_llm,
+            use_query_rewrite=use_query_rewrite,
+        )
+    )
+    return HTTPStatus.OK, _success_payload(response)
+
+
+def build_handler(settings: Settings, refresh_state: RefreshState | None = None) -> type[BaseHTTPRequestHandler]:
+    refresh_state = refresh_state or RefreshState()
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "PersonalMemoryHTTP/0.1"
 
         def do_GET(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            if parsed.path == "/":
-                self._send_html(HTML_PAGE)
-                return
-            if parsed.path == "/api/status":
-                summary = self._with_connection(lambda conn: status_summary(conn))
-                summary["vault_path"] = str(settings.vault_path) if settings.vault_path else None
-                summary["refresh_available"] = settings.vault_path is not None
-                summary["llm_provider"] = settings.llm_provider
-                summary["provider_defaults"] = settings.synthesis_model_defaults()
-                summary["provider_availability"] = settings.provider_availability()
-                self._send_json(summary)
-                return
-            if parsed.path == "/api/search":
-                query = parse_qs(parsed.query).get("query", [""])[0].strip()
-                top_k_raw = parse_qs(parsed.query).get("top_k", [str(settings.top_k)])[0]
-                try:
-                    top_k = max(1, int(top_k_raw))
-                except ValueError:
-                    top_k = settings.top_k
-                if not query:
-                    self._send_json({"results": []})
+            try:
+                parsed = urlparse(self.path)
+                if parsed.path == "/":
+                    self._send_html(HTML_PAGE)
                     return
-                results = self._with_connection(
-                    lambda conn: [asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k)]
+                status, response = handle_api_get(self.path, settings, refresh_state, self._with_connection)
+                self._send_json(response, status=status)
+            except APIError as exc:
+                self._send_json(_error_payload(exc), status=exc.status)
+            except Exception as exc:
+                self._send_json(
+                    _error_payload(
+                        APIError(
+                            "internal_error",
+                            str(exc),
+                            status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        )
+                    ),
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
-                self._send_json({"results": results})
-                return
-            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
         def do_POST(self) -> None:  # noqa: N802
             try:
-                parsed = urlparse(self.path)
-                if parsed.path == "/api/refresh":
-                    if settings.vault_path is None:
-                        self._send_json(
-                            {"error": "VAULT_PATH is not configured, so the index cannot be refreshed."},
-                            status=HTTPStatus.BAD_REQUEST,
-                        )
-                        return
-                    summary = self._with_connection(lambda conn: ingest_vault(conn, settings.vault_path, settings))
-                    self._send_json(summary)
-                    return
-                if parsed.path != "/api/chat":
-                    self.send_error(HTTPStatus.NOT_FOUND, "Not found")
-                    return
-
                 payload = self._read_json_body()
-                query = str(payload.get("query", "")).strip()
-                if not query:
-                    self._send_json({"error": "query is required"}, status=HTTPStatus.BAD_REQUEST)
-                    return
-
-                top_k = payload.get("top_k", settings.top_k)
-                provider = str(payload.get("provider", settings.llm_provider)).strip().lower() or settings.llm_provider
-                model = str(payload.get("model", "")).strip() or None
-                use_llm_raw = payload.get("use_llm", settings.enable_llm_synthesis)
-                rewrite_query_raw = payload.get("rewrite_query", settings.enable_query_rewrite)
-                try:
-                    top_k_value = max(1, int(top_k))
-                except (TypeError, ValueError):
-                    top_k_value = settings.top_k
-                use_llm = bool(use_llm_raw)
-                use_query_rewrite = bool(rewrite_query_raw)
-
-                request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
-
-                response = self._with_connection(
-                    lambda conn: answer_question(
-                        conn,
-                        query,
-                        request_settings,
-                        top_k=top_k_value,
-                        use_llm=use_llm,
-                        use_query_rewrite=use_query_rewrite,
-                    )
-                )
-                self._send_json(response)
+                status, response = handle_api_post(self.path, payload, settings, refresh_state, self._with_connection)
+                self._send_json(response, status=status)
+            except APIError as exc:
+                self._send_json(_error_payload(exc), status=exc.status)
             except Exception as exc:
-                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                self._send_json(
+                    _error_payload(
+                        APIError(
+                            "internal_error",
+                            str(exc),
+                            status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        )
+                    ),
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
 
         def log_message(self, format: str, *args: Any) -> None:
             return
@@ -781,8 +961,8 @@ def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> No
             body = self.rfile.read(length) if length else b"{}"
             try:
                 payload = json.loads(body.decode("utf-8") or "{}")
-            except json.JSONDecodeError:
-                return {}
+            except json.JSONDecodeError as exc:
+                raise APIError("invalid_json", "Request body must be valid JSON.", status=HTTPStatus.BAD_REQUEST) from exc
             return payload if isinstance(payload, dict) else {}
 
         def _send_html(self, html: str, status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -801,7 +981,11 @@ def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> No
             self.end_headers()
             self.wfile.write(encoded)
 
-    with ThreadingHTTPServer((host, port), Handler) as server:
+    return Handler
+
+
+def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> None:
+    with ThreadingHTTPServer((host, port), build_handler(settings)) as server:
         if host == "0.0.0.0":
             print(
                 "Serving Personal Memory on all interfaces "

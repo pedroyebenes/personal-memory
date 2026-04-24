@@ -100,3 +100,13 @@ def test_provider_availability_marks_missing_keys() -> None:
     assert availability["openai"]["available"] is False
     assert availability["gemini"]["available"] is False
     assert availability["nvidia"]["available"] is False
+
+
+def test_validate_reports_invalid_provider_and_missing_vault(tmp_path: Path) -> None:
+    settings = load_settings(None)
+    settings.llm_provider = "invalid-provider"
+    settings.vault_path = tmp_path / "missing-vault"
+
+    diagnostics = settings.validate()
+
+    assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+SUPPORTED_LLM_PROVIDERS = ("ollama", "openai", "gemini", "nvidia")
 DEFAULT_DATABASE_PATH = Path("data/cache/memory.sqlite3")
 DEFAULT_CONFIG_PATH = Path("config.json")
 DEFAULT_EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -46,6 +47,10 @@ class Settings:
     nvidia_base_url: str = DEFAULT_NVIDIA_BASE_URL
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
 
+    def is_supported_provider(self, provider: str | None = None) -> bool:
+        provider_name = (provider or self.llm_provider).strip().lower()
+        return provider_name in SUPPORTED_LLM_PROVIDERS
+
     def get_synthesis_model_name(self, provider: str | None = None) -> str | None:
         if self.synthesis_model_name:
             return self.synthesis_model_name
@@ -69,7 +74,7 @@ class Settings:
         }
 
     def provider_availability(self) -> dict[str, dict[str, str | bool]]:
-        return {
+        availability = {
             "ollama": {"available": True, "reason": ""},
             "openai": {
                 "available": bool(self.openai_api_key),
@@ -84,6 +89,57 @@ class Settings:
                 "reason": "" if self.nvidia_api_key else "NVIDIA_API_KEY is not configured.",
             },
         }
+        if not self.is_supported_provider():
+            availability[self.llm_provider] = {
+                "available": False,
+                "reason": f"Unsupported LLM_PROVIDER: {self.llm_provider}",
+            }
+        return availability
+
+    def validate(self) -> list[dict[str, str]]:
+        diagnostics: list[dict[str, str]] = []
+        if not self.is_supported_provider():
+            diagnostics.append(
+                {
+                    "code": "unsupported_provider",
+                    "field": "LLM_PROVIDER",
+                    "message": f"Unsupported LLM_PROVIDER: {self.llm_provider}",
+                }
+            )
+        if self.vault_path is not None:
+            if not self.vault_path.exists():
+                diagnostics.append(
+                    {
+                        "code": "vault_not_found",
+                        "field": "VAULT_PATH",
+                        "message": f"VAULT_PATH does not exist: {self.vault_path}",
+                    }
+                )
+            elif not self.vault_path.is_dir():
+                diagnostics.append(
+                    {
+                        "code": "vault_not_directory",
+                        "field": "VAULT_PATH",
+                        "message": f"VAULT_PATH is not a directory: {self.vault_path}",
+                    }
+                )
+        if self.database_path.exists() and not self.database_path.is_file():
+            diagnostics.append(
+                {
+                    "code": "database_not_file",
+                    "field": "DATABASE_PATH",
+                    "message": f"DATABASE_PATH is not a file: {self.database_path}",
+                }
+            )
+        elif self.database_path.parent.exists() and not self.database_path.parent.is_dir():
+            diagnostics.append(
+                {
+                    "code": "database_parent_not_directory",
+                    "field": "DATABASE_PATH",
+                    "message": f"DATABASE_PATH parent is not a directory: {self.database_path.parent}",
+                }
+            )
+        return diagnostics
 
 
 def _parse_bool(value: bool | str | None, default: bool) -> bool:
