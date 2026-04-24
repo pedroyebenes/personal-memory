@@ -37,3 +37,10 @@ class RetrievalResult:
     keyword_score: float | None
     semantic_score: float | None
     final_score: float
+
+
+@dataclass(slots=True)
+class SearchFilters:
+    tags: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+    path_prefix: str | None = None

@@ -152,3 +152,45 @@ def test_search_rejects_invalid_top_k(settings: Settings) -> None:
     assert int(status) == 400
     assert payload["ok"] is False
     assert payload["error"]["code"] == "invalid_top_k"
+
+
+def test_search_accepts_metadata_filters(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/search?query=launch%20plan&tags=project&aliases=north%20star",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["filters"]["tags"] == ["project"]
+    assert payload["filters"]["aliases"] == ["north star"]
+    assert payload["results"]
+    assert all("project-note.md" in item["source_path"] for item in payload["results"])
+
+
+def test_chat_response_includes_provider_model_and_filters(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/chat",
+        {
+            "query": "What is North Star?",
+            "filters": {"tags": ["project"]},
+            "provider": "ollama",
+        },
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["provider"] == "ollama"
+    assert "model" in payload
+    assert payload["filters"]["tags"] == ["project"]
+    assert payload["sources"]
+    assert "source_ref" in payload["sources"][0]

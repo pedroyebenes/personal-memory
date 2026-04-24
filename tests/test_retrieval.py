@@ -4,6 +4,7 @@ import json
 
 from app.config import Settings
 from app.ingest.register import ingest_vault
+from app.models import SearchFilters
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.semantic_search import semantic_search
 
@@ -24,3 +25,21 @@ def test_hybrid_score_merge(connection, fixture_vault, settings: Settings) -> No
     assert results
     assert any(result.keyword_score is not None for result in results)
     assert all(isinstance(result.final_score, float) for result in results)
+
+
+def test_hybrid_search_filters_by_tag_and_alias(connection, fixture_vault, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+
+    tag_filtered = hybrid_search(connection, "launch plan", settings, top_k=5, filters=SearchFilters(tags=("project",)))
+    alias_filtered = hybrid_search(
+        connection,
+        "launch plan",
+        settings,
+        top_k=5,
+        filters=SearchFilters(aliases=("north star",)),
+    )
+
+    assert tag_filtered
+    assert all("project-note.md" in item.source_path for item in tag_filtered)
+    assert alias_filtered
+    assert all("project-note.md" in item.source_path for item in alias_filtered)

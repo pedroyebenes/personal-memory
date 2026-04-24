@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from app.config import Settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, status_summary
+from app.models import SearchFilters
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.util.timestamps import utc_now_iso
@@ -405,6 +406,7 @@ HTML_PAGE = """<!doctype html>
             </form>
             <div id="search-results" class="search-results empty">No search results yet.</div>
           </section>
+
         </aside>
       </section>
     </main>
@@ -846,6 +848,48 @@ def _validate_provider_request(settings: Settings, provider: str, *, require_pro
         )
 
 
+def _parse_csv_filter(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        items = [item.strip().lower() for item in value.split(",")]
+        return tuple(item for item in items if item)
+    if isinstance(value, list):
+        return tuple(str(item).strip().lower() for item in value if str(item).strip())
+    raise APIError("invalid_filter", "Filter values must be strings or arrays.", status=HTTPStatus.BAD_REQUEST)
+
+
+def _read_filters(payload: dict[str, Any]) -> SearchFilters:
+    raw_filters = payload.get("filters", {})
+    if raw_filters is None:
+        raw_filters = {}
+    if not isinstance(raw_filters, dict):
+        raise APIError("invalid_filter", "filters must be an object.", status=HTTPStatus.BAD_REQUEST)
+    return SearchFilters(
+        tags=_parse_csv_filter(raw_filters.get("tags")),
+        aliases=_parse_csv_filter(raw_filters.get("aliases")),
+        path_prefix=str(raw_filters.get("path_prefix", "")).strip() or None,
+    )
+
+
+def _read_filters_from_query(path: str) -> SearchFilters:
+    parsed = urlparse(path)
+    query = parse_qs(parsed.query)
+    return SearchFilters(
+        tags=_parse_csv_filter(query.get("tags", [""])[0]),
+        aliases=_parse_csv_filter(query.get("aliases", [""])[0]),
+        path_prefix=str(query.get("path_prefix", [""])[0]).strip() or None,
+    )
+
+
+def _serialize_filters(filters: SearchFilters) -> dict[str, object]:
+    return {
+        "tags": list(filters.tags),
+        "aliases": list(filters.aliases),
+        "path_prefix": filters.path_prefix,
+    }
+
+
 def handle_api_get(
     path: str,
     settings: Settings,
@@ -866,10 +910,13 @@ def handle_api_get(
     if parsed.path == "/api/search":
         query = parse_qs(parsed.query).get("query", [""])[0].strip()
         top_k = _read_top_k(parse_qs(parsed.query).get("top_k", [settings.top_k])[0], settings.top_k)
+        filters = _read_filters_from_query(path)
         if not query:
             return HTTPStatus.OK, _success_payload({"results": []})
-        results = with_connection(lambda conn: [asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k)])
-        return HTTPStatus.OK, _success_payload({"results": results})
+        results = with_connection(
+            lambda conn: [asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k, filters=filters)]
+        )
+        return HTTPStatus.OK, _success_payload({"results": results, "filters": _serialize_filters(filters)})
     raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
 
 
@@ -918,6 +965,7 @@ def handle_api_post(
     model = str(payload.get("model", "")).strip() or None
     use_llm = _read_bool(payload, "use_llm", settings.enable_llm_synthesis)
     use_query_rewrite = _read_bool(payload, "rewrite_query", settings.enable_query_rewrite)
+    filters = _read_filters(payload)
 
     request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
     _validate_provider_request(request_settings, provider, require_provider=use_llm or use_query_rewrite)
@@ -930,8 +978,10 @@ def handle_api_post(
             top_k=top_k_value,
             use_llm=use_llm,
             use_query_rewrite=use_query_rewrite,
+            filters=filters,
         )
     )
+    response["filters"] = _serialize_filters(filters)
     return HTTPStatus.OK, _success_payload(response)
 
 
@@ -1006,6 +1056,8 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
             encoded = html.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Pragma", "no-cache")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
@@ -1014,6 +1066,8 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
             encoded = json.dumps(payload, indent=2).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Pragma", "no-cache")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)

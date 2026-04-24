@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.config import Settings
+from app.models import SearchFilters
 from app.retrieval.llm import LLMConfigurationError, synthesize_answer
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import resolve_retrieval_query
@@ -11,6 +12,7 @@ from app.retrieval.query_rewrite import resolve_retrieval_query
 def _build_sources(results) -> list[dict[str, object]]:
     sources = []
     for result in results:
+        anchor = result.section_title.lower().replace(" ", "-") if result.section_title else None
         sources.append(
             {
                 "document_title": result.document_title,
@@ -19,6 +21,7 @@ def _build_sources(results) -> list[dict[str, object]]:
                 "chunk_index": result.chunk_index,
                 "section_title": result.section_title,
                 "snippet": result.snippet,
+                "source_ref": f"{result.source_path}#{anchor}" if anchor else result.source_path,
             }
         )
     return sources
@@ -46,9 +49,10 @@ def answer_question(
     top_k: int = 5,
     use_llm: bool | None = None,
     use_query_rewrite: bool | None = None,
+    filters: SearchFilters | None = None,
 ) -> dict[str, object]:
     retrieval_query, warnings = resolve_retrieval_query(query, settings, use_query_rewrite=use_query_rewrite)
-    results = hybrid_search(connection, retrieval_query, settings, top_k=top_k)
+    results = hybrid_search(connection, retrieval_query, settings, top_k=top_k, filters=filters)
     if not results:
         return {
             "question": query,
@@ -57,6 +61,8 @@ def answer_question(
             "sources": [],
             "answer_mode": "extractive",
             "warnings": warnings + ["retrieval returned no evidence"],
+            "provider": settings.llm_provider,
+            "model": settings.get_synthesis_model_name(),
         }
 
     sources = _build_sources(results)
@@ -89,4 +95,6 @@ def answer_question(
         "sources": sources,
         "answer_mode": "extractive",
         "warnings": warnings,
+        "provider": settings.llm_provider,
+        "model": settings.get_synthesis_model_name(),
     }
