@@ -44,3 +44,5 @@ class SearchFilters:
     tags: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     path_prefix: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None

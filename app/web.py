@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 from dataclasses import asdict, replace
+from datetime import date, datetime, time, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -27,10 +28,12 @@ HTML_PAGE = """<!doctype html>
       :root {
         --bg: #f2efe8;
         --panel: rgba(255, 252, 246, 0.92);
+        --panel-strong: rgba(255, 255, 255, 0.84);
         --ink: #1e2a22;
         --muted: #5e695f;
         --accent: #0f766e;
         --accent-2: #d97706;
+        --accent-3: #334155;
         --border: rgba(30, 42, 34, 0.12);
         --shadow: 0 24px 60px rgba(27, 39, 31, 0.12);
       }
@@ -178,6 +181,23 @@ HTML_PAGE = """<!doctype html>
         background: linear-gradient(135deg, var(--accent-2) 0%, #b45309 100%);
       }
 
+      button.ghost,
+      a.ghost {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.66);
+        color: var(--accent-3);
+        padding: 9px 13px;
+        font: inherit;
+        font-size: 0.88rem;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
       button:disabled {
         opacity: 0.6;
         cursor: wait;
@@ -206,7 +226,7 @@ HTML_PAGE = """<!doctype html>
 
       .source, .search-result {
         padding: 12px;
-        background: rgba(255, 255, 255, 0.68);
+        background: var(--panel-strong);
         border-radius: 16px;
         border: 1px solid var(--border);
       }
@@ -237,6 +257,7 @@ HTML_PAGE = """<!doctype html>
         color: var(--muted);
         font-size: 0.88rem;
         line-height: 1.45;
+        white-space: pre-wrap;
         word-break: break-word;
       }
 
@@ -257,6 +278,81 @@ HTML_PAGE = """<!doctype html>
         padding: 12px 14px;
         font: inherit;
         background: rgba(255, 255, 255, 0.82);
+      }
+
+      .filter-panel {
+        margin: 0 4px 16px;
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        background:
+          linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(217, 119, 6, 0.06)),
+          rgba(255, 255, 255, 0.48);
+      }
+
+      .filter-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .filter-title {
+        font-size: 0.85rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 5px;
+      }
+
+      .field span {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .field input {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        padding: 11px 12px;
+        font: inherit;
+        background: rgba(255, 255, 255, 0.82);
+        color: inherit;
+      }
+
+      .active-filters {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.45;
+      }
+
+      .action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .mini-meta {
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.35;
+        margin-top: 6px;
       }
 
       .inline-form select,
@@ -325,6 +421,11 @@ HTML_PAGE = """<!doctype html>
         .messages {
           max-height: none;
         }
+
+        .filter-grid,
+        .provider-row {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -368,6 +469,35 @@ HTML_PAGE = """<!doctype html>
               </label>
             </div>
           </form>
+          <section class="filter-panel" aria-label="Search filters">
+            <div class="filter-header">
+              <div class="filter-title">Filters</div>
+              <button id="clear-filters" class="ghost" type="button">Clear filters</button>
+            </div>
+            <div class="filter-grid">
+              <label class="field">
+                <span>Tags</span>
+                <input id="filter-tags" type="text" placeholder="project, planning">
+              </label>
+              <label class="field">
+                <span>Aliases</span>
+                <input id="filter-aliases" type="text" placeholder="North Star">
+              </label>
+              <label class="field">
+                <span>Path prefix</span>
+                <input id="filter-path-prefix" type="text" placeholder="/vault/projects">
+              </label>
+              <label class="field">
+                <span>Modified from</span>
+                <input id="filter-date-from" type="date">
+              </label>
+              <label class="field">
+                <span>Modified to</span>
+                <input id="filter-date-to" type="date">
+              </label>
+            </div>
+            <div id="active-filters" class="active-filters">No filters active.</div>
+          </section>
           <form id="chat-form" class="composer">
             <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
             <button id="send-button" type="submit">✨ Ask</button>
@@ -381,6 +511,11 @@ HTML_PAGE = """<!doctype html>
               <button class="secondary" id="refresh-button" type="submit">🔄 Refresh Index</button>
             </form>
             <div id="stats" class="stats empty">Loading status…</div>
+          </section>
+
+          <section class="card">
+            <h2>🛰 Provider</h2>
+            <div id="response-provider" class="sources empty">No response yet.</div>
           </section>
 
           <section class="card">
@@ -407,6 +542,20 @@ HTML_PAGE = """<!doctype html>
             <div id="search-results" class="search-results empty">No search results yet.</div>
           </section>
 
+          <section class="card">
+            <h2>🕘 Recent Queries</h2>
+            <div id="recent-queries" class="sources empty">No recent queries yet.</div>
+          </section>
+
+          <section class="card">
+            <h2>📌 Saved Searches</h2>
+            <form id="saved-search-form" class="inline-form">
+              <input id="saved-search-name" type="text" placeholder="Save current query as">
+              <button class="secondary" id="save-search-button" type="submit">Save Search</button>
+            </form>
+            <div id="saved-searches" class="sources empty">No saved searches yet.</div>
+          </section>
+
         </aside>
       </section>
     </main>
@@ -419,6 +568,7 @@ HTML_PAGE = """<!doctype html>
       const stats = document.getElementById("stats");
       const refreshForm = document.getElementById("refresh-form");
       const refreshButton = document.getElementById("refresh-button");
+      const responseProvider = document.getElementById("response-provider");
       const sources = document.getElementById("sources");
       const retrievalQuery = document.getElementById("retrieval-query");
       const warnings = document.getElementById("warnings");
@@ -426,13 +576,26 @@ HTML_PAGE = """<!doctype html>
       const searchQueryInput = document.getElementById("search-query");
       const searchButton = document.getElementById("search-button");
       const searchResults = document.getElementById("search-results");
+      const recentQueries = document.getElementById("recent-queries");
+      const savedSearchForm = document.getElementById("saved-search-form");
+      const savedSearchNameInput = document.getElementById("saved-search-name");
+      const savedSearches = document.getElementById("saved-searches");
       const useLlmInput = document.getElementById("use-llm");
       const rewriteQueryInput = document.getElementById("rewrite-query");
       const providerSelect = document.getElementById("llm-provider");
       const synthesisModelInput = document.getElementById("synthesis-model");
       const providerStatus = document.getElementById("provider-status");
+      const filterTagsInput = document.getElementById("filter-tags");
+      const filterAliasesInput = document.getElementById("filter-aliases");
+      const filterPathPrefixInput = document.getElementById("filter-path-prefix");
+      const filterDateFromInput = document.getElementById("filter-date-from");
+      const filterDateToInput = document.getElementById("filter-date-to");
+      const activeFilters = document.getElementById("active-filters");
+      const clearFiltersButton = document.getElementById("clear-filters");
       let providerDefaults = {};
       let providerAvailability = {};
+      const RECENT_QUERIES_KEY = "personal-memory-recent-queries";
+      const SAVED_SEARCHES_KEY = "personal-memory-saved-searches";
 
       function formatErrorMessage(errorPayload) {
         if (!errorPayload) return "Request failed.";
@@ -448,6 +611,186 @@ HTML_PAGE = """<!doctype html>
         item.querySelector(".body").textContent = text;
         messages.appendChild(item);
         messages.scrollTop = messages.scrollHeight;
+      }
+
+      function parseCsv(value) {
+        return value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      function readFilters() {
+        return {
+          tags: parseCsv(filterTagsInput.value),
+          aliases: parseCsv(filterAliasesInput.value),
+          path_prefix: filterPathPrefixInput.value.trim() || null,
+          date_from: filterDateFromInput.value || null,
+          date_to: filterDateToInput.value || null,
+        };
+      }
+
+      function setFilters(filters = {}) {
+        filterTagsInput.value = (filters.tags || []).join(", ");
+        filterAliasesInput.value = (filters.aliases || []).join(", ");
+        filterPathPrefixInput.value = filters.path_prefix || "";
+        filterDateFromInput.value = normalizeDateInput(filters.date_from);
+        filterDateToInput.value = normalizeDateInput(filters.date_to);
+        renderActiveFilters();
+      }
+
+      function normalizeDateInput(value) {
+        if (!value) return "";
+        return String(value).slice(0, 10);
+      }
+
+      function filterLabels(filters = readFilters()) {
+        const labels = [];
+        if (filters.tags?.length) labels.push(`tags: ${filters.tags.join(", ")}`);
+        if (filters.aliases?.length) labels.push(`aliases: ${filters.aliases.join(", ")}`);
+        if (filters.path_prefix) labels.push(`path: ${filters.path_prefix}`);
+        if (filters.date_from) labels.push(`from: ${filters.date_from}`);
+        if (filters.date_to) labels.push(`to: ${filters.date_to}`);
+        return labels;
+      }
+
+      function renderActiveFilters() {
+        const labels = filterLabels();
+        activeFilters.textContent = labels.length ? `Active filters: ${labels.join(" · ")}` : "No filters active.";
+      }
+
+      function appendFiltersToParams(params, filters = readFilters()) {
+        for (const tag of filters.tags || []) params.append("tags", tag);
+        for (const alias of filters.aliases || []) params.append("aliases", alias);
+        if (filters.path_prefix) params.set("path_prefix", filters.path_prefix);
+        if (filters.date_from) params.set("date_from", filters.date_from);
+        if (filters.date_to) params.set("date_to", filters.date_to);
+      }
+
+      function loadStoredList(key) {
+        try {
+          return JSON.parse(localStorage.getItem(key) || "[]");
+        } catch {
+          return [];
+        }
+      }
+
+      function saveStoredList(key, value) {
+        localStorage.setItem(key, JSON.stringify(value));
+      }
+
+      function rememberQuery(query) {
+        const entries = loadStoredList(RECENT_QUERIES_KEY).filter((item) => item !== query);
+        entries.unshift(query);
+        saveStoredList(RECENT_QUERIES_KEY, entries.slice(0, 8));
+        renderRecentQueries();
+      }
+
+      function renderRecentQueries() {
+        const entries = loadStoredList(RECENT_QUERIES_KEY);
+        if (!entries.length) {
+          recentQueries.className = "sources empty";
+          recentQueries.textContent = "No recent queries yet.";
+          return;
+        }
+        recentQueries.className = "sources";
+        recentQueries.innerHTML = "";
+        for (const entry of entries) {
+          const card = document.createElement("div");
+          card.className = "source";
+          const title = document.createElement("div");
+          title.className = "source-title";
+          title.textContent = entry;
+          card.appendChild(title);
+          const actions = document.createElement("div");
+          actions.className = "action-row";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ghost";
+          button.textContent = "Reuse";
+          button.addEventListener("click", () => {
+            queryInput.value = entry;
+            searchQueryInput.value = entry;
+          });
+          actions.appendChild(button);
+          card.appendChild(actions);
+          recentQueries.appendChild(card);
+        }
+      }
+
+      function renderSavedSearches() {
+        const entries = loadStoredList(SAVED_SEARCHES_KEY);
+        if (!entries.length) {
+          savedSearches.className = "sources empty";
+          savedSearches.textContent = "No saved searches yet.";
+          return;
+        }
+        savedSearches.className = "sources";
+        savedSearches.innerHTML = "";
+        for (const entry of entries) {
+          const card = document.createElement("div");
+          card.className = "source";
+          const title = document.createElement("div");
+          title.className = "source-title";
+          title.textContent = entry.name;
+          const query = document.createElement("div");
+          query.className = "source-meta";
+          query.textContent = entry.query;
+          const filterSummary = document.createElement("div");
+          filterSummary.className = "mini-meta";
+          const labels = filterLabels(entry.filters || {});
+          filterSummary.textContent = labels.length ? labels.join(" · ") : "No filters";
+          card.append(title, query, filterSummary);
+          const actions = document.createElement("div");
+          actions.className = "action-row";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ghost";
+          button.textContent = "Run";
+          button.addEventListener("click", () => {
+            queryInput.value = entry.query;
+            searchQueryInput.value = entry.query;
+            setFilters(entry.filters || {});
+          });
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "ghost";
+          deleteButton.textContent = "Delete";
+          deleteButton.addEventListener("click", () => {
+            const remaining = loadStoredList(SAVED_SEARCHES_KEY).filter((item) => item.name !== entry.name);
+            saveStoredList(SAVED_SEARCHES_KEY, remaining);
+            renderSavedSearches();
+          });
+          actions.append(button, deleteButton);
+          card.appendChild(actions);
+          savedSearches.appendChild(card);
+        }
+      }
+
+      function renderResponseProvider(provider, model) {
+        if (!provider && !model) {
+          responseProvider.className = "sources empty";
+          responseProvider.textContent = "No response yet.";
+          return;
+        }
+        responseProvider.className = "sources";
+        responseProvider.innerHTML = "";
+        const card = document.createElement("div");
+        card.className = "source";
+        const meta = document.createElement("div");
+        meta.className = "source-meta";
+        meta.textContent = `Provider: ${provider || "unknown"}\nModel: ${model || "default"}`;
+        card.appendChild(meta);
+        responseProvider.appendChild(card);
+      }
+
+      async function copyText(value, successMessage) {
+        try {
+          await navigator.clipboard.writeText(value);
+          renderWarnings([successMessage]);
+        } catch (error) {
+          renderWarnings([`Copy failed: ${error}`]);
+        }
       }
 
       function renderStatus(payload) {
@@ -466,6 +809,7 @@ HTML_PAGE = """<!doctype html>
           ["Vault", payload.vault_path || "not configured"],
           ["Latest Run", payload.latest_run ? `${payload.latest_run.run_type} (${payload.latest_run.status})` : "none"],
           ["Refresh State", refreshLabel],
+          ["Refresh Ready", payload.refresh_available ? "yes" : "no"],
         ];
         for (const [label, value] of entries) {
           const row = document.createElement("div");
@@ -481,6 +825,10 @@ HTML_PAGE = """<!doctype html>
         }
         if (diagnosticWarnings.length) {
           renderWarnings(diagnosticWarnings);
+        } else if (refreshState.in_progress) {
+          renderWarnings(["Refresh is in progress."]);
+        } else if (refreshState.last_result?.status === "completed") {
+          renderWarnings(["Last refresh completed successfully."]);
         }
       }
 
@@ -544,11 +892,36 @@ HTML_PAGE = """<!doctype html>
           const card = document.createElement("div");
           card.className = "source";
           const section = item.section_title ? ` · ${item.section_title}` : "";
-          card.innerHTML = `
-            <div class="source-title">${item.document_title}${section}</div>
-            <div class="source-path">${item.source_path}</div>
-            <div class="source-snippet">${item.snippet}</div>
-          `;
+          const title = document.createElement("div");
+          title.className = "source-title";
+          title.textContent = `${item.document_title}${section}`;
+          const path = document.createElement("div");
+          path.className = "source-path";
+          path.textContent = item.source_path;
+          const snippet = document.createElement("div");
+          snippet.className = "source-snippet";
+          snippet.textContent = item.snippet;
+          const meta = document.createElement("div");
+          meta.className = "source-meta";
+          meta.textContent = item.source_ref || item.source_path;
+          const actions = document.createElement("div");
+          actions.className = "action-row";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ghost";
+          button.textContent = "Copy Source Ref";
+          button.addEventListener("click", () => copyText(item.source_ref || item.source_path, "Source reference copied."));
+          const pathButton = document.createElement("button");
+          pathButton.type = "button";
+          pathButton.className = "ghost";
+          pathButton.textContent = "Copy Path";
+          pathButton.addEventListener("click", () => copyText(item.source_path, "Source path copied."));
+          const openLink = document.createElement("a");
+          openLink.className = "ghost";
+          openLink.textContent = "Open Hook";
+          openLink.href = `obsidian://open?path=${encodeURIComponent(item.source_path)}`;
+          actions.append(button, pathButton, openLink);
+          card.append(title, path, snippet, meta, actions);
           sources.appendChild(card);
         }
       }
@@ -565,12 +938,37 @@ HTML_PAGE = """<!doctype html>
           const card = document.createElement("div");
           card.className = "search-result";
           const section = item.section_title ? ` · ${item.section_title}` : "";
-          card.innerHTML = `
-            <div class="search-title">${item.document_title}${section}</div>
-            <div class="search-path">${item.source_path}</div>
-            <div class="search-snippet">${item.snippet}</div>
-            <div class="search-meta">Final score: ${item.final_score.toFixed(3)}</div>
-          `;
+          const title = document.createElement("div");
+          title.className = "search-title";
+          title.textContent = `${item.document_title}${section}`;
+          const path = document.createElement("div");
+          path.className = "search-path";
+          path.textContent = item.source_path;
+          const snippet = document.createElement("div");
+          snippet.className = "search-snippet";
+          snippet.textContent = item.snippet;
+          const meta = document.createElement("div");
+          meta.className = "search-meta";
+          meta.textContent = `Final score: ${item.final_score.toFixed(3)}`;
+          const actions = document.createElement("div");
+          actions.className = "action-row";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ghost";
+          button.textContent = "Copy Path";
+          button.addEventListener("click", () => copyText(item.source_path, "Source path copied."));
+          const refButton = document.createElement("button");
+          refButton.type = "button";
+          refButton.className = "ghost";
+          refButton.textContent = "Copy Section Ref";
+          const sourceRef = item.section_title ? `${item.source_path}#${item.section_title.toLowerCase().replaceAll(" ", "-")}` : item.source_path;
+          refButton.addEventListener("click", () => copyText(sourceRef, "Section reference copied."));
+          const openLink = document.createElement("a");
+          openLink.className = "ghost";
+          openLink.textContent = "Open Hook";
+          openLink.href = `obsidian://open?path=${encodeURIComponent(item.source_path)}`;
+          actions.append(button, refButton, openLink);
+          card.append(title, path, snippet, meta, actions);
           searchResults.appendChild(card);
         }
       }
@@ -598,7 +996,14 @@ HTML_PAGE = """<!doctype html>
           return;
         }
         retrievalQuery.className = "sources";
-        retrievalQuery.innerHTML = `<div class="source"><div class="source-meta">${value}</div></div>`;
+        retrievalQuery.innerHTML = "";
+        const card = document.createElement("div");
+        card.className = "source";
+        const meta = document.createElement("div");
+        meta.className = "source-meta";
+        meta.textContent = value;
+        card.appendChild(meta);
+        retrievalQuery.appendChild(card);
       }
 
       async function loadStatus() {
@@ -646,6 +1051,7 @@ HTML_PAGE = """<!doctype html>
         event.preventDefault();
         const query = queryInput.value.trim();
         if (!query) return;
+        const filters = readFilters();
         appendMessage("user", query);
         queryInput.value = "";
         sendButton.disabled = true;
@@ -660,6 +1066,7 @@ HTML_PAGE = """<!doctype html>
               rewrite_query: rewriteQueryInput.checked,
               provider: providerSelect.value,
               model: synthesisModelInput.value.trim(),
+              filters,
             }),
           });
           const payload = await response.json();
@@ -669,16 +1076,20 @@ HTML_PAGE = """<!doctype html>
             renderSources([]);
             renderRetrievalQuery(payload.retrieval_query || "");
             renderWarnings([errorMessage]);
+            renderResponseProvider("", "");
             return;
           }
+          rememberQuery(query);
           appendMessage("assistant", payload.answer);
           renderSources(payload.sources || []);
           renderRetrievalQuery(payload.retrieval_query || query);
           renderWarnings(payload.warnings || []);
+          renderResponseProvider(payload.provider, payload.model);
         } catch (error) {
           appendMessage("assistant", `Request failed: ${error}`);
           renderRetrievalQuery("");
           renderWarnings([`Request failed: ${error}`]);
+          renderResponseProvider("", "");
         } finally {
           sendButton.disabled = false;
         }
@@ -690,11 +1101,14 @@ HTML_PAGE = """<!doctype html>
         if (!query) return;
         searchButton.disabled = true;
         try {
-          const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`);
+          const params = new URLSearchParams({ query });
+          appendFiltersToParams(params);
+          const response = await fetch(`/api/search?${params.toString()}`);
           const payload = await response.json();
           if (!response.ok) {
             throw new Error(formatErrorMessage(payload.error));
           }
+          rememberQuery(query);
           renderSearchResults(payload.results || []);
         } catch (error) {
           searchResults.className = "search-results empty";
@@ -704,9 +1118,30 @@ HTML_PAGE = """<!doctype html>
         }
       });
 
+      savedSearchForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = savedSearchNameInput.value.trim();
+        const query = (searchQueryInput.value || queryInput.value).trim();
+        if (!name || !query) return;
+        const entries = loadStoredList(SAVED_SEARCHES_KEY).filter((item) => item.name !== name);
+        entries.unshift({ name, query, filters: readFilters() });
+        saveStoredList(SAVED_SEARCHES_KEY, entries.slice(0, 8));
+        savedSearchNameInput.value = "";
+        renderSavedSearches();
+      });
+
+      clearFiltersButton.addEventListener("click", () => setFilters({}));
+      for (const input of [filterTagsInput, filterAliasesInput, filterPathPrefixInput, filterDateFromInput, filterDateToInput]) {
+        input.addEventListener("input", renderActiveFilters);
+      }
+
       loadStatus();
+      renderRecentQueries();
+      renderSavedSearches();
       providerSelect.addEventListener("change", syncProviderState);
       renderRetrievalQuery("");
+      renderResponseProvider("", "");
+      renderActiveFilters();
     </script>
   </body>
 </html>
@@ -855,8 +1290,57 @@ def _parse_csv_filter(value: object) -> tuple[str, ...]:
         items = [item.strip().lower() for item in value.split(",")]
         return tuple(item for item in items if item)
     if isinstance(value, list):
-        return tuple(str(item).strip().lower() for item in value if str(item).strip())
+        items = []
+        for item in value:
+            items.extend(part.strip().lower() for part in str(item).split(","))
+        return tuple(item for item in items if item)
     raise APIError("invalid_filter", "Filter values must be strings or arrays.", status=HTTPStatus.BAD_REQUEST)
+
+
+def _parse_optional_string_filter(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise APIError(
+            "invalid_filter",
+            f"{field} must be a string.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": field},
+        )
+    return value.strip() or None
+
+
+def _parse_date_filter(value: object, *, field: str, end_of_day: bool = False) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise APIError(
+            "invalid_filter",
+            f"{field} must be a date string.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": field},
+        )
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        if len(raw) == 10:
+            parsed_date = date.fromisoformat(raw)
+            parsed_datetime = datetime.combine(parsed_date, time.max if end_of_day else time.min, tzinfo=timezone.utc)
+        else:
+            parsed_datetime = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed_datetime.tzinfo is None:
+                parsed_datetime = parsed_datetime.replace(tzinfo=timezone.utc)
+            else:
+                parsed_datetime = parsed_datetime.astimezone(timezone.utc)
+    except ValueError as exc:
+        raise APIError(
+            "invalid_filter",
+            f"{field} must be an ISO date or datetime.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": field},
+        ) from exc
+    return parsed_datetime.replace(microsecond=0).isoformat()
 
 
 def _read_filters(payload: dict[str, Any]) -> SearchFilters:
@@ -865,20 +1349,42 @@ def _read_filters(payload: dict[str, Any]) -> SearchFilters:
         raw_filters = {}
     if not isinstance(raw_filters, dict):
         raise APIError("invalid_filter", "filters must be an object.", status=HTTPStatus.BAD_REQUEST)
+    date_from = _parse_date_filter(raw_filters.get("date_from"), field="filters.date_from")
+    date_to = _parse_date_filter(raw_filters.get("date_to"), field="filters.date_to", end_of_day=True)
+    if date_from and date_to and date_from > date_to:
+        raise APIError(
+            "invalid_filter",
+            "filters.date_from must be before filters.date_to.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": "filters.date_from"},
+        )
     return SearchFilters(
         tags=_parse_csv_filter(raw_filters.get("tags")),
         aliases=_parse_csv_filter(raw_filters.get("aliases")),
-        path_prefix=str(raw_filters.get("path_prefix", "")).strip() or None,
+        path_prefix=_parse_optional_string_filter(raw_filters.get("path_prefix"), field="filters.path_prefix"),
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
 def _read_filters_from_query(path: str) -> SearchFilters:
     parsed = urlparse(path)
     query = parse_qs(parsed.query)
+    date_from = _parse_date_filter(query.get("date_from", [""])[0], field="date_from")
+    date_to = _parse_date_filter(query.get("date_to", [""])[0], field="date_to", end_of_day=True)
+    if date_from and date_to and date_from > date_to:
+        raise APIError(
+            "invalid_filter",
+            "date_from must be before date_to.",
+            status=HTTPStatus.BAD_REQUEST,
+            details={"field": "date_from"},
+        )
     return SearchFilters(
-        tags=_parse_csv_filter(query.get("tags", [""])[0]),
-        aliases=_parse_csv_filter(query.get("aliases", [""])[0]),
-        path_prefix=str(query.get("path_prefix", [""])[0]).strip() or None,
+        tags=_parse_csv_filter(query.get("tags", [])),
+        aliases=_parse_csv_filter(query.get("aliases", [])),
+        path_prefix=_parse_optional_string_filter(query.get("path_prefix", [""])[0], field="path_prefix"),
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
@@ -887,6 +1393,8 @@ def _serialize_filters(filters: SearchFilters) -> dict[str, object]:
         "tags": list(filters.tags),
         "aliases": list(filters.aliases),
         "path_prefix": filters.path_prefix,
+        "date_from": filters.date_from,
+        "date_to": filters.date_to,
     }
 
 

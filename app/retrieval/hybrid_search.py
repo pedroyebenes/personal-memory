@@ -22,6 +22,7 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
         SELECT
             c.id AS chunk_id,
             d.source_path,
+            d.last_modified,
             GROUP_CONCAT(DISTINCT dt.tag) AS tags,
             GROUP_CONCAT(DISTINCT da.alias) AS aliases
         FROM chunks c
@@ -29,7 +30,7 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
         LEFT JOIN document_tags dt ON dt.document_id = d.id
         LEFT JOIN document_aliases da ON da.document_id = d.id
         WHERE c.id IN ({placeholders})
-        GROUP BY c.id, d.source_path
+        GROUP BY c.id, d.source_path, d.last_modified
         """,
         tuple(chunk_ids),
     ).fetchall()
@@ -37,6 +38,7 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
     for row in rows:
         metadata[int(row["chunk_id"])] = {
             "source_path": row["source_path"],
+            "last_modified": row["last_modified"],
             "tags": {item.strip().lower() for item in str(row["tags"] or "").split(",") if item.strip()},
             "aliases": {item.strip().lower() for item in str(row["aliases"] or "").split(",") if item.strip()},
         }
@@ -44,14 +46,19 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
 
 
 def _matches_filters(result: RetrievalResult, filters: SearchFilters, metadata: dict[int, dict[str, object]]) -> bool:
-    if not (filters.tags or filters.aliases or filters.path_prefix):
+    if not (filters.tags or filters.aliases or filters.path_prefix or filters.date_from or filters.date_to):
         return True
     item = metadata.get(result.chunk_id, {})
     result_path = str(item.get("source_path") or result.source_path)
+    last_modified = str(item.get("last_modified") or "")
     item_tags = item.get("tags", set())
     item_aliases = item.get("aliases", set())
 
     if filters.path_prefix and not result_path.startswith(filters.path_prefix):
+        return False
+    if filters.date_from and last_modified < filters.date_from:
+        return False
+    if filters.date_to and last_modified > filters.date_to:
         return False
     if filters.tags and not set(filters.tags).issubset(item_tags):
         return False

@@ -172,6 +172,47 @@ def test_search_accepts_metadata_filters(connection, fixture_vault: Path, settin
     assert all("project-note.md" in item["source_path"] for item in payload["results"])
 
 
+def test_search_filters_by_modified_date_range(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    connection.execute(
+        """
+        UPDATE documents
+        SET last_modified = CASE
+            WHEN source_path LIKE '%project-note.md' THEN '2024-02-15T12:00:00+00:00'
+            ELSE '2022-01-01T00:00:00+00:00'
+        END
+        """
+    )
+    connection.commit()
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/search?query=launch%20plan&date_from=2024-01-01&date_to=2024-12-31",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["filters"]["date_from"] == "2024-01-01T00:00:00+00:00"
+    assert payload["filters"]["date_to"] == "2024-12-31T23:59:59+00:00"
+    assert payload["results"]
+    assert all("project-note.md" in item["source_path"] for item in payload["results"])
+
+
+def test_search_rejects_invalid_date_range(settings: Settings) -> None:
+    try:
+        handle_api_get("/api/search?query=test&date_from=2025-01-01&date_to=2024-01-01", settings, RefreshState(), lambda callback: callback)
+    except APIError as exc:
+        status = exc.status
+        payload = _error_payload(exc)
+    else:
+        raise AssertionError("Expected APIError")
+
+    assert int(status) == 400
+    assert payload["error"]["code"] == "invalid_filter"
+
+
 def test_chat_response_includes_provider_model_and_filters(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     with_connection = lambda callback: callback(connection)
@@ -180,7 +221,7 @@ def test_chat_response_includes_provider_model_and_filters(connection, fixture_v
         "/api/chat",
         {
             "query": "What is North Star?",
-            "filters": {"tags": ["project"]},
+            "filters": {"tags": ["project"], "date_from": "2000-01-01"},
             "provider": "ollama",
         },
         settings,
@@ -192,5 +233,27 @@ def test_chat_response_includes_provider_model_and_filters(connection, fixture_v
     assert payload["provider"] == "ollama"
     assert "model" in payload
     assert payload["filters"]["tags"] == ["project"]
+    assert payload["filters"]["date_from"] == "2000-01-01T00:00:00+00:00"
     assert payload["sources"]
     assert "source_ref" in payload["sources"][0]
+
+
+def test_chat_treats_null_path_prefix_as_no_filter(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/chat",
+        {
+            "query": "What is North Star?",
+            "filters": {"tags": [], "aliases": [], "path_prefix": None, "date_from": None, "date_to": None},
+        },
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["filters"]["path_prefix"] is None
+    assert payload["sources"]
+    assert "retrieval returned no evidence" not in payload["warnings"]
