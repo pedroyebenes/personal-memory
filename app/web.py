@@ -630,6 +630,13 @@ HTML_PAGE = """<!doctype html>
             }),
           });
           const payload = await response.json();
+          if (!response.ok) {
+            appendMessage("assistant", payload.error || "Request failed.");
+            renderSources([]);
+            renderRetrievalQuery(payload.retrieval_query || "");
+            renderWarnings([payload.error || "Request failed."]);
+            return;
+          }
           appendMessage("assistant", payload.answer);
           renderSources(payload.sources || []);
           renderRetrievalQuery(payload.retrieval_query || query);
@@ -651,6 +658,9 @@ HTML_PAGE = """<!doctype html>
         try {
           const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`);
           const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || "Search failed.");
+          }
           renderSearchResults(payload.results || []);
         } catch (error) {
           searchResults.className = "search-results empty";

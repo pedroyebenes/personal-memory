@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.cli import main
 from app.config import Settings
+from app.ingest import register
 from app.ingest.register import ingest_vault, reindex_vault
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
@@ -75,3 +78,41 @@ def test_search_and_ask_commands(connection, fixture_vault: Path, settings: Sett
     response = answer_question(connection, "What is North Star?", settings, top_k=2)
     assert response["sources"]
     assert response["question"] == "What is North Star?"
+
+
+def test_ingest_marks_run_failed_when_processing_raises(connection, fixture_vault: Path, settings: Settings, monkeypatch) -> None:
+    original = register._ingest_single_document
+    calls = {"count": 0}
+
+    def flaky_ingest(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("boom")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(register, "_ingest_single_document", flaky_ingest)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        ingest_vault(connection, fixture_vault, settings)
+
+    latest_run = connection.execute("SELECT status FROM ingestion_runs ORDER BY id DESC LIMIT 1").fetchone()
+    assert latest_run["status"] == "failed"
+
+
+def test_reindex_marks_run_failed_when_processing_raises(connection, fixture_vault: Path, settings: Settings, monkeypatch) -> None:
+    original = register.parse_markdown_file
+    calls = {"count": 0}
+
+    def flaky_parse(path):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("boom")
+        return original(path)
+
+    monkeypatch.setattr(register, "parse_markdown_file", flaky_parse)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        reindex_vault(connection, fixture_vault, settings)
+
+    latest_run = connection.execute("SELECT status FROM ingestion_runs ORDER BY id DESC LIMIT 1").fetchone()
+    assert latest_run["status"] == "failed"

@@ -11,6 +11,10 @@ def _estimate_tokens(text: str) -> int:
     return max(1, int(len(text.split()) * 1.3))
 
 
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
 def _split_paragraphs(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
 
@@ -91,6 +95,18 @@ def _split_large_section(
     return chunks
 
 
+def _combine_chunks(first: ChunkRecord, second: ChunkRecord) -> ChunkRecord:
+    combined_text = f"{first.text}\n\n{second.text}".strip()
+    return ChunkRecord(
+        chunk_index=first.chunk_index,
+        section_title=first.section_title or second.section_title,
+        text=combined_text,
+        token_estimate=_estimate_tokens(combined_text),
+        char_start=first.char_start,
+        char_end=second.char_end,
+    )
+
+
 def chunk_document(
     text: str,
     target_max_words: int = 800,
@@ -119,17 +135,34 @@ def chunk_document(
             )
 
     merged_chunks: list[ChunkRecord] = []
+    pending_small_chunk: ChunkRecord | None = None
     for chunk in raw_chunks:
-        word_count = len(chunk.text.split())
+        if pending_small_chunk is not None:
+            combined = _combine_chunks(pending_small_chunk, chunk)
+            if _word_count(combined.text) <= target_max_words:
+                chunk = combined
+            else:
+                merged_chunks.append(pending_small_chunk)
+            pending_small_chunk = None
+
+        word_count = _word_count(chunk.text)
         if merged_chunks and word_count < min_words:
-            previous = merged_chunks[-1]
-            previous.text = f"{previous.text}\n\n{chunk.text}".strip()
-            previous.token_estimate = _estimate_tokens(previous.text)
-            previous.char_end = chunk.char_end
-            if previous.section_title is None:
-                previous.section_title = chunk.section_title
+            combined = _combine_chunks(merged_chunks[-1], chunk)
+            if _word_count(combined.text) <= target_max_words:
+                merged_chunks[-1] = combined
+            else:
+                merged_chunks.append(chunk)
+            continue
+        if word_count < min_words:
+            pending_small_chunk = chunk
             continue
         merged_chunks.append(chunk)
+
+    if pending_small_chunk is not None:
+        if merged_chunks:
+            merged_chunks[-1] = _combine_chunks(merged_chunks[-1], pending_small_chunk)
+        else:
+            merged_chunks.append(pending_small_chunk)
 
     for index, chunk in enumerate(merged_chunks):
         chunk.chunk_index = index

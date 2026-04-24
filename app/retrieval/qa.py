@@ -56,7 +56,7 @@ def answer_question(
             "answer": "No relevant evidence found.",
             "sources": [],
             "answer_mode": "extractive",
-            "warnings": ["retrieval returned no evidence"],
+            "warnings": warnings + ["retrieval returned no evidence"],
         }
 
     sources = _build_sources(results)

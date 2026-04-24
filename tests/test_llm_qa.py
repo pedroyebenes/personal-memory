@@ -33,6 +33,15 @@ def test_answer_question_uses_llm_when_available(connection, fixture_vault, sett
     assert response["provider"] == "ollama"
 
 
+def test_answer_question_keeps_rewrite_warnings_when_no_results(connection, settings, monkeypatch) -> None:
+    monkeypatch.setattr(qa, "resolve_retrieval_query", lambda *args, **kwargs: ("rewritten", ["rewrite failed"]))
+    monkeypatch.setattr(qa, "hybrid_search", lambda *args, **kwargs: [])
+
+    response = qa.answer_question(connection, "Missing topic", settings, use_query_rewrite=True)
+
+    assert response["warnings"] == ["rewrite failed", "retrieval returned no evidence"]
+
+
 def test_nvidia_chat_completions_parser_handles_string_content() -> None:
     result = {
         "choices": [

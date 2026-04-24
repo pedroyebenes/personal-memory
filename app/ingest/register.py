@@ -209,13 +209,18 @@ def _ingest_single_document(connection: sqlite3.Connection, path: Path, settings
 
 def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Settings) -> dict[str, object]:
     run_id = _record_run(connection, "ingest", vault_path, "running")
-    markdown_paths = scan_markdown_files(vault_path)
-    current_paths = {str(path) for path in markdown_paths}
-    pruned = _prune_documents_not_in_vault(connection, current_paths)
     counts = {"indexed": 0, "skipped": 0}
-    for path in markdown_paths:
-        status, _ = _ingest_single_document(connection, path, settings)
-        counts[status] += 1
+    pruned = 0
+    try:
+        markdown_paths = scan_markdown_files(vault_path)
+        current_paths = {str(path) for path in markdown_paths}
+        pruned = _prune_documents_not_in_vault(connection, current_paths)
+        for path in markdown_paths:
+            status, _ = _ingest_single_document(connection, path, settings)
+            counts[status] += 1
+    except Exception:
+        _record_run(connection, "ingest", vault_path, "failed", counts["indexed"], run_id=run_id)
+        raise
     _record_run(connection, "ingest", vault_path, "completed", counts["indexed"], run_id=run_id)
     return {
         "run_id": run_id,
@@ -236,17 +241,21 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
     connection.execute("DELETE FROM documents")
     connection.commit()
 
-    markdown_paths = scan_markdown_files(vault_path)
     indexed = 0
-    for path in markdown_paths:
-        parsed = parse_markdown_file(path)
-        content_hash = sha256_text(parsed.raw_text)
-        document_id = _upsert_document(connection, parsed, content_hash, utc_now_iso())
-        chunks = chunk_document(parsed.normalized_text)
-        chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
-        if chunk_ids:
-            _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
-        indexed += 1
+    try:
+        markdown_paths = scan_markdown_files(vault_path)
+        for path in markdown_paths:
+            parsed = parse_markdown_file(path)
+            content_hash = sha256_text(parsed.raw_text)
+            document_id = _upsert_document(connection, parsed, content_hash, utc_now_iso())
+            chunks = chunk_document(parsed.normalized_text)
+            chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
+            if chunk_ids:
+                _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
+            indexed += 1
+    except Exception:
+        _record_run(connection, "reindex", vault_path, "failed", indexed, run_id=run_id)
+        raise
     _record_run(connection, "reindex", vault_path, "completed", indexed, run_id=run_id)
     return {"run_id": run_id, "vault_path": str(vault_path), "indexed": indexed, "skipped": 0, "pruned": 0}
 
