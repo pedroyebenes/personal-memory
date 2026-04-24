@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -78,6 +79,26 @@ def test_search_and_ask_commands(connection, fixture_vault: Path, settings: Sett
     response = answer_question(connection, "What is North Star?", settings, top_k=2)
     assert response["sources"]
     assert response["question"] == "What is North Star?"
+
+
+def test_status_command_includes_config_diagnostics(tmp_path: Path, monkeypatch, capsys) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "VAULT_PATH": str(tmp_path / "missing-vault"),
+                "DATABASE_PATH": str(tmp_path / "memory.sqlite3"),
+                "LLM_PROVIDER": "invalid-provider",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["personal-memory", "--config", str(config_path), "status"])
+
+    main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert {item["code"] for item in payload["config_diagnostics"]} == {"unsupported_provider", "vault_not_found"}
 
 
 def test_ingest_marks_run_failed_when_processing_raises(connection, fixture_vault: Path, settings: Settings, monkeypatch) -> None:

@@ -4,8 +4,9 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
 
-from app.config import load_settings
+from app.config import format_diagnostics, load_settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, reindex_vault, status_summary
 from app.retrieval.hybrid_search import hybrid_search
@@ -57,17 +58,29 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     settings = load_settings(args.config)
+    config_diagnostics = settings.validate()
     connection = connect(settings.database_path)
 
     if args.command == "init-db":
         init_db(connection)
-        print(json.dumps({"database_path": str(settings.database_path), "status": "initialized"}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "database_path": str(settings.database_path),
+                    "status": "initialized",
+                    "config_diagnostics": config_diagnostics,
+                },
+                indent=2,
+            )
+        )
         return
 
     init_db(connection)
 
     if args.command == "status":
-        print(json.dumps(status_summary(connection), indent=2))
+        payload = status_summary(connection)
+        payload["config_diagnostics"] = config_diagnostics
+        print(json.dumps(payload, indent=2))
         return
 
     if args.command == "ingest":
@@ -114,6 +127,9 @@ def main() -> None:
 
     if args.command == "web":
         connection.close()
+        if config_diagnostics:
+            for message in format_diagnostics(config_diagnostics):
+                print(f"Configuration warning: {message}", file=sys.stderr)
         serve_web(settings, host=args.host, port=args.port)
         return
 

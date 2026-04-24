@@ -432,6 +432,13 @@ HTML_PAGE = """<!doctype html>
       let providerDefaults = {};
       let providerAvailability = {};
 
+      function formatErrorMessage(errorPayload) {
+        if (!errorPayload) return "Request failed.";
+        if (typeof errorPayload === "string") return errorPayload;
+        if (typeof errorPayload.message === "string" && errorPayload.message) return errorPayload.message;
+        return "Request failed.";
+      }
+
       function appendMessage(role, text) {
         const item = document.createElement("div");
         item.className = `message ${role}`;
@@ -446,12 +453,17 @@ HTML_PAGE = """<!doctype html>
         providerAvailability = payload.provider_availability || {};
         stats.classList.remove("empty");
         stats.innerHTML = "";
+        const refreshState = payload.refresh_state || {};
+        const refreshLabel = refreshState.in_progress
+          ? "running"
+          : refreshState.last_result?.status || "idle";
         const entries = [
           ["Documents", payload.documents],
           ["Chunks", payload.chunks],
           ["Embeddings", payload.embeddings],
           ["Vault", payload.vault_path || "not configured"],
           ["Latest Run", payload.latest_run ? `${payload.latest_run.run_type} (${payload.latest_run.status})` : "none"],
+          ["Refresh State", refreshLabel],
         ];
         for (const [label, value] of entries) {
           const row = document.createElement("div");
@@ -459,8 +471,15 @@ HTML_PAGE = """<!doctype html>
           row.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
           stats.appendChild(row);
         }
-        refreshButton.disabled = !payload.refresh_available;
+        refreshButton.disabled = !payload.refresh_available || Boolean(refreshState.in_progress);
         syncProviderOptions(payload.llm_provider || "ollama");
+        const diagnosticWarnings = (payload.config_diagnostics || []).map((item) => item.message);
+        if (refreshState.last_result?.status === "failed" && refreshState.last_result?.error) {
+          diagnosticWarnings.unshift(`Last refresh failed: ${refreshState.last_result.error}`);
+        }
+        if (diagnosticWarnings.length) {
+          renderWarnings(diagnosticWarnings);
+        }
       }
 
       function syncModelInput() {
@@ -581,9 +600,19 @@ HTML_PAGE = """<!doctype html>
       }
 
       async function loadStatus() {
-        const response = await fetch("/api/status");
-        const payload = await response.json();
-        renderStatus(payload);
+        try {
+          const response = await fetch("/api/status");
+          const payload = await response.json();
+          if (!response.ok) {
+            renderWarnings([formatErrorMessage(payload.error)]);
+            return;
+          }
+          renderStatus(payload);
+        } catch (error) {
+          stats.className = "stats empty";
+          stats.textContent = "Status unavailable.";
+          renderWarnings([`Status check failed: ${error}`]);
+        }
       }
 
       refreshForm.addEventListener("submit", async (event) => {
@@ -597,7 +626,7 @@ HTML_PAGE = """<!doctype html>
           });
           const payload = await response.json();
           if (!response.ok) {
-            renderWarnings([payload.error || "Refresh failed."]);
+            renderWarnings([formatErrorMessage(payload.error)]);
             return;
           }
           renderWarnings([
@@ -633,10 +662,11 @@ HTML_PAGE = """<!doctype html>
           });
           const payload = await response.json();
           if (!response.ok) {
-            appendMessage("assistant", payload.error || "Request failed.");
+            const errorMessage = formatErrorMessage(payload.error);
+            appendMessage("assistant", errorMessage);
             renderSources([]);
             renderRetrievalQuery(payload.retrieval_query || "");
-            renderWarnings([payload.error || "Request failed."]);
+            renderWarnings([errorMessage]);
             return;
           }
           appendMessage("assistant", payload.answer);
@@ -661,7 +691,7 @@ HTML_PAGE = """<!doctype html>
           const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`);
           const payload = await response.json();
           if (!response.ok) {
-            throw new Error(payload.error || "Search failed.");
+            throw new Error(formatErrorMessage(payload.error));
           }
           renderSearchResults(payload.results || []);
         } catch (error) {
@@ -716,12 +746,14 @@ class RefreshState:
         with self._state_lock:
             self._in_progress = True
             self._started_at = utc_now_iso()
+            self._last_result = None
 
     def finish(self, result: dict[str, object]) -> None:
         with self._state_lock:
             self._in_progress = False
             self._last_completed_at = utc_now_iso()
             self._last_result = dict(result)
+            self._started_at = None
         self._refresh_lock.release()
 
     def snapshot(self) -> dict[str, object]:
@@ -861,7 +893,12 @@ def handle_api_post(
             summary = with_connection(lambda conn: ingest_vault(conn, settings.vault_path, settings))
         except Exception as exc:
             refresh_state.finish({"status": "failed", "error": str(exc)})
-            raise
+            raise APIError(
+                "refresh_failed",
+                f"Refresh failed: {exc}",
+                status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                details={"refresh_state": refresh_state.snapshot()},
+            ) from exc
         refresh_state.finish({"status": "completed", **summary})
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path != "/api/chat":

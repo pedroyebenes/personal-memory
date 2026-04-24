@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 SUPPORTED_LLM_PROVIDERS = ("ollama", "openai", "gemini", "nvidia")
 DEFAULT_DATABASE_PATH = Path("data/cache/memory.sqlite3")
@@ -73,39 +74,107 @@ class Settings:
             "ollama": self.ollama_synthesis_model_name,
         }
 
-    def provider_availability(self) -> dict[str, dict[str, str | bool]]:
-        availability = {
-            "ollama": {"available": True, "reason": ""},
-            "openai": {
-                "available": bool(self.openai_api_key),
-                "reason": "" if self.openai_api_key else "OPENAI_API_KEY is not configured.",
-            },
-            "gemini": {
-                "available": bool(self.gemini_api_key),
-                "reason": "" if self.gemini_api_key else "GEMINI_API_KEY is not configured.",
-            },
-            "nvidia": {
-                "available": bool(self.nvidia_api_key),
-                "reason": "" if self.nvidia_api_key else "NVIDIA_API_KEY is not configured.",
-            },
+    def provider_config(self, provider: str | None = None) -> dict[str, str | None]:
+        provider_name = (provider or self.llm_provider).strip().lower()
+        return {
+            "provider": provider_name,
+            "model_name": self.get_synthesis_model_name(provider_name),
+            "base_url": {
+                "openai": self.openai_base_url,
+                "gemini": self.gemini_base_url,
+                "nvidia": self.nvidia_base_url,
+                "ollama": self.ollama_base_url,
+            }.get(provider_name),
+            "api_key": {
+                "openai": self.openai_api_key,
+                "gemini": self.gemini_api_key,
+                "nvidia": self.nvidia_api_key,
+                "ollama": None,
+            }.get(provider_name),
         }
+
+    def provider_diagnostics(self, provider: str | None = None) -> list[dict[str, str]]:
+        provider_name = (provider or self.llm_provider).strip().lower()
+        diagnostics: list[dict[str, str]] = []
+        if not self.is_supported_provider(provider_name):
+            diagnostics.append(
+                {
+                    "code": "unsupported_provider",
+                    "field": "LLM_PROVIDER",
+                    "message": f"Unsupported LLM_PROVIDER: {provider_name}",
+                }
+            )
+            return diagnostics
+
+        provider_config = self.provider_config(provider_name)
+        model_name = str(provider_config.get("model_name") or "").strip()
+        if not model_name:
+            diagnostics.append(
+                {
+                    "code": "missing_provider_model",
+                    "field": "SYNTHESIS_MODEL_NAME",
+                    "message": f"No synthesis model is configured for provider {provider_name}.",
+                }
+            )
+
+        base_url = str(provider_config.get("base_url") or "").strip()
+        parsed_base_url = urlparse(base_url)
+        if not base_url:
+            diagnostics.append(
+                {
+                    "code": "missing_provider_base_url",
+                    "field": f"{provider_name.upper()}_BASE_URL",
+                    "message": f"No base URL is configured for provider {provider_name}.",
+                }
+            )
+        elif parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
+            diagnostics.append(
+                {
+                    "code": "invalid_provider_base_url",
+                    "field": f"{provider_name.upper()}_BASE_URL",
+                    "message": f"Base URL for provider {provider_name} must be a valid http(s) URL.",
+                }
+            )
+
+        requires_api_key = provider_name in {"openai", "gemini", "nvidia"}
+        api_key = str(provider_config.get("api_key") or "").strip()
+        if requires_api_key and not api_key:
+            diagnostics.append(
+                {
+                    "code": "missing_provider_api_key",
+                    "field": f"{provider_name.upper()}_API_KEY",
+                    "message": f"{provider_name.upper()}_API_KEY is not configured.",
+                }
+            )
+        return diagnostics
+
+    def provider_availability(self) -> dict[str, dict[str, str | bool]]:
+        availability: dict[str, dict[str, str | bool]] = {}
+        for provider_name in SUPPORTED_LLM_PROVIDERS:
+            diagnostics = self.provider_diagnostics(provider_name)
+            availability[provider_name] = {
+                "available": not diagnostics,
+                "reason": diagnostics[0]["message"] if diagnostics else "",
+            }
         if not self.is_supported_provider():
+            diagnostics = self.provider_diagnostics(self.llm_provider)
             availability[self.llm_provider] = {
                 "available": False,
-                "reason": f"Unsupported LLM_PROVIDER: {self.llm_provider}",
+                "reason": diagnostics[0]["message"] if diagnostics else f"Unsupported LLM_PROVIDER: {self.llm_provider}",
             }
         return availability
 
     def validate(self) -> list[dict[str, str]]:
         diagnostics: list[dict[str, str]] = []
-        if not self.is_supported_provider():
+        if self.top_k < 1:
             diagnostics.append(
                 {
-                    "code": "unsupported_provider",
-                    "field": "LLM_PROVIDER",
-                    "message": f"Unsupported LLM_PROVIDER: {self.llm_provider}",
+                    "code": "invalid_top_k",
+                    "field": "TOP_K",
+                    "message": "TOP_K must be greater than zero.",
                 }
             )
+        diagnostics.extend(self.provider_diagnostics())
         if self.vault_path is not None:
             if not self.vault_path.exists():
                 diagnostics.append(
@@ -166,6 +235,22 @@ def _coerce_path(value: str | None, *, base_dir: Path | None = None, resolve: bo
     return path.resolve() if resolve else path
 
 
+def _parse_positive_int(value: str | int | None, default: int, field_name: str) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer.") from exc
+    if parsed < 1:
+        raise ValueError(f"{field_name} must be greater than zero.")
+    return parsed
+
+
+def format_diagnostics(diagnostics: list[dict[str, str]]) -> list[str]:
+    return [item["message"] for item in diagnostics]
+
+
 def load_settings(config_path: str | None = None) -> Settings:
     file_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     file_values = _load_config_file(file_path if file_path.exists() else None)
@@ -201,7 +286,7 @@ def load_settings(config_path: str | None = None) -> Settings:
         vault_path=vault_path,
         database_path=database_path or DEFAULT_DATABASE_PATH,
         embedding_model_name=model_value or DEFAULT_EMBEDDING_MODEL_NAME,
-        top_k=int(top_k_value) if top_k_value is not None else DEFAULT_TOP_K,
+        top_k=_parse_positive_int(top_k_value, DEFAULT_TOP_K, "TOP_K"),
         enable_llm_synthesis=_parse_bool(enable_value, DEFAULT_ENABLE_LLM_SYNTHESIS),
         enable_query_rewrite=_parse_bool(rewrite_value, DEFAULT_ENABLE_QUERY_REWRITE),
         llm_provider=(provider_value or DEFAULT_LLM_PROVIDER).strip().lower(),

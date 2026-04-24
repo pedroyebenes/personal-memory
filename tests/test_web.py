@@ -6,6 +6,7 @@ from pathlib import Path
 from app.config import Settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault
+from app import web
 from app.web import APIError, RefreshState, _error_payload, handle_api_get, handle_api_post
 
 
@@ -70,6 +71,28 @@ def test_chat_rejects_unavailable_provider_when_llm_requested(connection, fixtur
     assert payload["error"]["code"] == "provider_unavailable"
 
 
+def test_chat_rejects_invalid_boolean_flags(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    try:
+        handle_api_post(
+            "/api/chat",
+            {"query": "What is North Star?", "use_llm": "sometimes"},
+            settings,
+            RefreshState(),
+            with_connection,
+        )
+    except APIError as exc:
+        status = exc.status
+        payload = _error_payload(exc)
+    else:
+        raise AssertionError("Expected APIError")
+
+    assert int(status) == 400
+    assert payload["error"]["code"] == "invalid_boolean"
+
+
 def test_refresh_rejects_concurrent_requests(settings: Settings) -> None:
     settings.vault_path = settings.database_path.parent
     refresh_state = RefreshState()
@@ -87,6 +110,34 @@ def test_refresh_rejects_concurrent_requests(settings: Settings) -> None:
     assert int(status) == 409
     assert payload["ok"] is False
     assert payload["error"]["code"] == "refresh_in_progress"
+
+
+def test_refresh_returns_structured_failure_and_tracks_last_result(settings: Settings, monkeypatch) -> None:
+    settings.vault_path = settings.database_path.parent
+    refresh_state = RefreshState()
+
+    monkeypatch.setattr(web, "ingest_vault", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("disk full")))
+
+    connection = connect(settings.database_path)
+    init_db(connection)
+    try:
+        with_connection = lambda callback: callback(connection)
+        try:
+            handle_api_post("/api/refresh", {}, settings, refresh_state, with_connection)
+        except APIError as exc:
+            status = exc.status
+            payload = _error_payload(exc)
+        else:
+            raise AssertionError("Expected APIError")
+    finally:
+        connection.close()
+
+    snapshot = refresh_state.snapshot()
+    assert int(status) == 500
+    assert payload["error"]["code"] == "refresh_failed"
+    assert snapshot["in_progress"] is False
+    assert snapshot["last_result"]["status"] == "failed"
+    assert snapshot["last_result"]["error"] == "disk full"
 
 
 def test_search_rejects_invalid_top_k(settings: Settings) -> None:

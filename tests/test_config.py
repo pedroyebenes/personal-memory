@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import load_settings
+from app.config import Settings, format_diagnostics, load_settings
 
 
 def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
@@ -93,7 +93,11 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
 
 
 def test_provider_availability_marks_missing_keys() -> None:
-    settings = load_settings(None)
+    settings = Settings(
+        openai_api_key=None,
+        gemini_api_key=None,
+        nvidia_api_key=None,
+    )
     availability = settings.provider_availability()
 
     assert availability["ollama"]["available"] is True
@@ -110,3 +114,39 @@ def test_validate_reports_invalid_provider_and_missing_vault(tmp_path: Path) -> 
     diagnostics = settings.validate()
 
     assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
+
+
+def test_validate_reports_provider_model_and_base_url_problems() -> None:
+    settings = load_settings(None)
+    settings.llm_provider = "ollama"
+    settings.ollama_synthesis_model_name = ""
+    settings.ollama_base_url = "not-a-url"
+
+    diagnostics = settings.validate()
+
+    assert {item["code"] for item in diagnostics} >= {"missing_provider_model", "invalid_provider_base_url"}
+
+
+def test_load_settings_rejects_invalid_top_k(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"TOP_K": 0}', encoding="utf-8")
+
+    try:
+        load_settings(str(config_path))
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+    assert message == "TOP_K must be greater than zero."
+
+
+def test_format_diagnostics_returns_messages_only() -> None:
+    messages = format_diagnostics(
+        [
+            {"code": "one", "field": "A", "message": "First issue"},
+            {"code": "two", "field": "B", "message": "Second issue"},
+        ]
+    )
+
+    assert messages == ["First issue", "Second issue"]
