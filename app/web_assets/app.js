@@ -50,6 +50,7 @@
       const filterDateFromInput = document.getElementById("filter-date-from");
       const filterDateToInput = document.getElementById("filter-date-to");
       const activeFilters = document.getElementById("active-filters");
+      const activeFilterSummary = document.getElementById("active-filter-summary");
       const clearFiltersButton = document.getElementById("clear-filters");
       let providerDefaults = {};
       let providerAvailability = {};
@@ -134,6 +135,7 @@
       function renderActiveFilters() {
         const labels = filterLabels();
         activeFilters.textContent = labels.length ? `Active filters: ${labels.join(" · ")}` : "No filters active.";
+        activeFilterSummary.textContent = labels.length ? `${labels.length} active` : "None";
       }
 
       function appendFiltersToParams(params, filters = readFilters()) {

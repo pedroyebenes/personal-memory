@@ -31,7 +31,7 @@
       </header>
 
       <section class="layout">
-        <aside class="panel left-rail">
+        <aside class="panel left-rail" role="complementary" aria-label="Controls drawer">
           <div class="rail-tabs" role="tablist" aria-label="Main view navigation">
             <button id="answers-tab" class="rail-tab active" type="button" data-main-view="answers">Answers</button>
             <button id="search-tab" class="rail-tab" type="button" data-main-view="search">Search</button>
@@ -39,52 +39,57 @@
             <button id="eval-tab" class="rail-tab" type="button" data-main-view="eval">Eval</button>
           </div>
 
-          <section class="card sidebar-section" data-sidebar-view="answers">
-            <h2>Answer Workspaces</h2>
+          <section class="control-panel sidebar-section" data-sidebar-view="answers" aria-label="Answer workspace selector">
+            <h2>Workspaces</h2>
             <nav id="answer-tabs" class="answer-tabs" aria-label="Answers"></nav>
           </section>
 
           <details class="control-panel sidebar-section" data-sidebar-view="answers search" open>
-            <summary>Retrieval Settings</summary>
-            <form id="llm-form" class="control-body">
-              <div class="control-group">
-                <div class="control-group-title">Model & Retrieval</div>
-                <div class="provider-row">
-                  <select id="llm-provider">
-                    <option value="ollama">Ollama</option>
-                    <option value="gemini">Gemini</option>
-                    <option value="nvidia">NVIDIA</option>
-                    <option value="openai">OpenAI</option>
-                  </select>
-                  <input id="synthesis-model" type="text" placeholder="Model name">
+            <summary>Retrieval</summary>
+            <form id="llm-form" class="control-body compact-controls">
+              <label class="field">
+                <span>Top K</span>
+                <input id="top-k" type="number" min="1" step="1" value="5">
+              </label>
+              <label class="toggle-field">
+                <input id="rerank-results" type="checkbox">
+                <span>Rerank</span>
+              </label>
+              <label class="toggle-field">
+                <input id="concept-boost-results" type="checkbox">
+                <span>Concept boost</span>
+              </label>
+              <details class="nested-panel">
+                <summary>Advanced</summary>
+                <div class="nested-body">
+                  <div class="provider-row">
+                    <select id="llm-provider" aria-label="Provider">
+                      <option value="ollama">Ollama</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="nvidia">NVIDIA</option>
+                      <option value="openai">OpenAI</option>
+                    </select>
+                    <input id="synthesis-model" type="text" placeholder="Model">
+                  </div>
+                  <div id="provider-status" class="provider-status">Checking provider availability...</div>
+                  <label class="toggle-field">
+                    <input id="use-llm" type="checkbox">
+                    <span>LLM synthesis</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="rewrite-query" type="checkbox">
+                    <span>Query rewrite</span>
+                  </label>
                 </div>
-                <div id="provider-status" class="provider-status">Checking provider availability...</div>
-                <label>
-                  <input id="use-llm" type="checkbox">
-                  Use LLM synthesis for answers
-                </label>
-                <label>
-                  <input id="rewrite-query" type="checkbox">
-                  Rewrite query before retrieval
-                </label>
-                <label>
-                  <input id="rerank-results" type="checkbox">
-                  Rerank retrieved evidence
-                </label>
-                <label>
-                  <input id="concept-boost-results" type="checkbox">
-                  Boost concept matches
-                </label>
-                <label class="field">
-                  <span>Sources</span>
-                  <input id="top-k" type="number" min="1" step="1" value="5">
-                </label>
-              </div>
+              </details>
             </form>
           </details>
 
           <details class="control-panel sidebar-section" data-sidebar-view="answers search" open>
-            <summary>Filters</summary>
+            <summary>
+              <span>Filters</span>
+              <span id="active-filter-summary" class="summary-note">None</span>
+            </summary>
             <section class="filter-panel" aria-label="Search filters">
               <div class="filter-header">
                 <div id="active-filters" class="active-filters">No filters active.</div>
@@ -150,20 +155,6 @@
               <button class="secondary" id="eval-button" type="submit">Run Checks</button>
             </form>
           </details>
-
-          <section class="card sidebar-section" data-sidebar-view="search">
-            <h2>Saved Searches</h2>
-            <form id="saved-search-form" class="inline-form">
-              <input id="saved-search-name" type="text" placeholder="Save current query as">
-              <button class="secondary" id="save-search-button" type="submit">Save Search</button>
-            </form>
-            <div id="saved-searches" class="sources empty">No saved searches yet.</div>
-          </section>
-
-          <section class="card sidebar-section" data-sidebar-view="search">
-            <h2>Recent Queries</h2>
-            <div id="recent-queries" class="sources empty">No recent queries yet.</div>
-          </section>
         </aside>
 
         <div class="panel chat-panel">
@@ -186,6 +177,20 @@
               <button class="secondary" id="search-button" type="submit">Search</button>
             </form>
             <div id="search-results" class="search-results empty">No search results yet.</div>
+            <section class="main-subsections" aria-label="Search history">
+              <section class="main-subsection">
+                <h3>Saved Searches</h3>
+                <form id="saved-search-form" class="inline-form compact-save-form">
+                  <input id="saved-search-name" type="text" placeholder="Save current query as">
+                  <button class="secondary" id="save-search-button" type="submit">Save</button>
+                </form>
+                <div id="saved-searches" class="sources compact-list empty">No saved searches yet.</div>
+              </section>
+              <section class="main-subsection">
+                <h3>Recent Queries</h3>
+                <div id="recent-queries" class="sources compact-list empty">No recent queries yet.</div>
+              </section>
+            </section>
           </section>
 
           <section id="concepts-view" class="main-view">

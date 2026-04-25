@@ -33,14 +33,31 @@ def test_web_assets_are_split_and_linked() -> None:
     assert 'id="concepts-view"' in html
     assert 'id="eval-view"' in html
     assert '<form id="search-form" class="main-search-form">' in html
+    assert 'aria-label="Controls drawer"' in html
     assert 'id="search-pane"' not in html
     assert 'id="concepts-pane"' not in html
     assert 'id="concept-boost-results"' in html
     assert 'id="eval-cases"' in html
+    assert ">Top K<" in html
+    assert ">Rerank<" in html
+    assert ">Concept boost<" in html
+    assert ">Advanced<" in html
+    assert 'id="active-filter-summary"' in html
     assert 'data-sidebar-view="answers search"' in html
     assert 'data-sidebar-view="concepts"' in html
     assert 'data-sidebar-view="eval"' in html
+    assert 'data-sidebar-view="search"' not in html
+    assert html.index('id="saved-searches"') > html.index('id="search-results"')
+    assert html.index('id="recent-queries"') > html.index('id="search-results"')
+    assert html.index('id="concept-results"') > html.index('id="concepts-view"')
+    assert html.index('id="eval-results"') > html.index('id="eval-view"')
+    assert "Saved Searches</h2>" not in html
+    assert "Recent Queries</h2>" not in html
+    assert ".main-subsections" in css
+    assert ".nested-panel" in css
+    assert ".summary-note" in css
     assert "const sidebarSections" in js
+    assert "const activeFilterSummary" in js
     assert "section.hidden = !views.includes(name)" in js
     assert ".sidebar-section[hidden]" in css
     assert 'id="viz-search"' in viz_html
@@ -55,9 +72,28 @@ def test_viz_api_returns_named_clusters(connection, fixture_vault: Path, setting
 
     assert int(status) == 200
     assert payload["points"]
+    assert payload["points"][0]["document_id"] >= 1
+    assert payload["points"][0]["source_path"]
     assert payload["clusters"]
     assert payload["clusters"][0]["name"]
     assert payload["clusters"][0]["size"] > 0
+
+
+def test_document_by_id_api_returns_raw_text(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    _, viz = handle_api_get("/api/viz", settings, RefreshState(), with_connection)
+    doc_id = int(viz["points"][0]["document_id"])
+    path = f"/api/documents/{doc_id}"
+    status, payload = handle_api_get(path, settings, RefreshState(), with_connection)
+
+    assert int(status) == 200
+    assert payload["document_id"] == doc_id
+    assert payload["source_path"]
+    assert "title" in payload
+    assert "raw_text" in payload
+    assert len(payload["raw_text"]) > 0
 
 
 def test_status_reports_config_diagnostics(tmp_path: Path) -> None:

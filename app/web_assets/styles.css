@@ -116,7 +116,7 @@
 
       .layout {
         display: grid;
-        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
         gap: 18px;
       }
 
@@ -134,9 +134,9 @@
       }
 
       .left-rail {
-        padding: 18px;
+        padding: 14px;
         display: grid;
-        gap: 14px;
+        gap: 10px;
         align-content: start;
         min-height: 720px;
         max-height: calc(100vh - 180px);
@@ -145,23 +145,23 @@
 
       .answer-tabs {
         display: grid;
-        gap: 8px;
+        gap: 6px;
         align-content: start;
-        max-height: 240px;
+        max-height: 220px;
         overflow-y: auto;
         padding-right: 4px;
       }
 
       .answer-tab {
         display: grid;
-        gap: 5px;
+        gap: 4px;
         width: 100%;
-        min-height: 72px;
+        min-height: 58px;
         border: 1px solid var(--border);
         border-radius: 12px;
         background: rgba(255, 255, 255, 0.64);
         color: var(--ink);
-        padding: 10px 12px;
+        padding: 8px 10px;
         text-align: left;
         align-self: stretch;
       }
@@ -175,11 +175,12 @@
         font-weight: 700;
         line-height: 1.25;
         overflow-wrap: anywhere;
+        font-size: 0.9rem;
       }
 
       .answer-tab-meta {
         color: var(--muted);
-        font-size: 0.78rem;
+        font-size: 0.74rem;
         line-height: 1.35;
       }
 
@@ -435,24 +436,45 @@
 
       .control-panel {
         border: 1px solid var(--border);
-        border-radius: 16px;
+        border-radius: 14px;
         background: rgba(255, 255, 255, 0.54);
-        padding: 12px;
+        padding: 10px;
       }
 
       .control-panel > summary {
         cursor: pointer;
-        font-size: 0.88rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.8rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--accent-3);
         font-weight: 700;
       }
 
+      .summary-note {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 0.72rem;
+        letter-spacing: 0;
+        text-transform: none;
+        font-weight: 400;
+      }
+
+      .control-panel h2 {
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent-3);
+        margin: 0 0 8px;
+      }
+
       .control-body {
         display: grid;
-        gap: 14px;
-        margin-top: 12px;
+        gap: 10px;
+        margin-top: 10px;
       }
 
       .control-group {
@@ -483,6 +505,33 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 10px;
+      }
+
+      .main-subsections {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        align-items: start;
+      }
+
+      .main-subsection {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.56);
+        padding: 12px;
+      }
+
+      .main-subsection h3 {
+        margin: 0;
+        color: var(--accent-3);
+        font-size: 0.96rem;
+      }
+
+      .compact-save-form {
+        grid-template-columns: minmax(0, 1fr) auto;
       }
 
       .main-search-form input {
@@ -516,18 +565,20 @@
       .control-body select,
       .control-body label {
         width: 100%;
-        border-radius: 14px;
+        border-radius: 12px;
         border: 1px solid var(--border);
-        padding: 12px 14px;
+        padding: 9px 10px;
         font: inherit;
         background: rgba(255, 255, 255, 0.82);
         color: inherit;
+        min-width: 0;
       }
 
-      .control-body label {
+      .control-body label,
+      .toggle-field {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
       }
 
       .control-body input[type="checkbox"] {
@@ -537,15 +588,15 @@
 
       .filter-panel {
         display: grid;
-        gap: 10px;
+        gap: 8px;
       }
 
       .filter-header {
         display: flex;
         justify-content: space-between;
-        gap: 12px;
+        gap: 8px;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 8px;
       }
 
       .filter-title {
@@ -559,7 +610,7 @@
       .filter-grid {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 10px;
+        gap: 8px;
       }
 
       .field {
@@ -576,18 +627,18 @@
 
       .field input {
         width: 100%;
-        border-radius: 14px;
+        border-radius: 12px;
         border: 1px solid var(--border);
-        padding: 11px 12px;
+        padding: 9px 10px;
         font: inherit;
         background: rgba(255, 255, 255, 0.82);
         color: inherit;
       }
 
       .active-filters {
-        margin-top: 12px;
+        margin-top: 0;
         color: var(--muted);
-        font-size: 0.9rem;
+        font-size: 0.82rem;
         line-height: 1.45;
       }
 
@@ -619,7 +670,27 @@
       .provider-row {
         display: grid;
         grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-        gap: 10px;
+        gap: 8px;
+      }
+
+      .nested-panel {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(30, 42, 34, 0.04);
+        padding: 8px 10px;
+      }
+
+      .nested-panel > summary {
+        cursor: pointer;
+        color: var(--accent-3);
+        font-size: 0.84rem;
+        font-weight: 700;
+      }
+
+      .nested-body {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
       }
 
       .inline-form label {
@@ -695,13 +766,18 @@
       }
 
       .provider-status {
-        padding: 10px 12px;
+        padding: 8px 10px;
         background: rgba(30, 42, 34, 0.06);
-        border-radius: 14px;
+        border-radius: 12px;
         border: 1px solid var(--border);
         color: var(--muted);
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         line-height: 1.45;
+      }
+
+      .compact-list .source {
+        padding: 10px;
+        border-radius: 12px;
       }
 
       .empty {
@@ -723,8 +799,10 @@
         .control-grid,
         .settings-grid,
         .filter-grid,
+        .main-subsections,
         .answer-meta-grid,
         .provider-row,
+        .compact-save-form,
         .main-search-form {
           grid-template-columns: 1fr;
         }
