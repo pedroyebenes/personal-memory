@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
+from collections import Counter
 from dataclasses import asdict, replace
 from datetime import date, datetime, time, timezone
 from http import HTTPStatus
@@ -95,6 +97,45 @@ def _truncate(text: str, limit: int = 220) -> str:
     return flat[:limit].rsplit(" ", 1)[0] + "…"
 
 
+_VIZ_CAPITALIZED_PHRASE = re.compile(
+    r"\b([A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*(?:\s+[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*){1,4})\b"
+)
+_VIZ_STOP_TERMS = {
+    "chapter",
+    "capítulo",
+    "section",
+    "parte",
+    "libro",
+    "text",
+    "notes",
+    "untitled",
+}
+
+
+def _cluster_name_from_rows(rows: list[sqlite3.Row]) -> dict[str, object]:
+    phrases: Counter[str] = Counter()
+    labels: Counter[str] = Counter()
+    for row in rows:
+        for value in (row["section_title"], row["document_title"]):
+            label = str(value or "").strip()
+            if label and len(label) <= 90:
+                labels[label] += 1
+        text = str(row["text"] or "")
+        for match in _VIZ_CAPITALIZED_PHRASE.finditer(text):
+            phrase = " ".join(match.group(1).split())
+            normalized = phrase.lower()
+            if normalized in _VIZ_STOP_TERMS or normalized.startswith(("chapter ", "capítulo ")):
+                continue
+            phrases[phrase] += 1
+
+    chosen = [phrase for phrase, count in phrases.most_common(3) if count >= 2]
+    if not chosen:
+        chosen = [label for label, _ in labels.most_common(2)]
+    if not chosen:
+        chosen = ["Mixed notes"]
+    return {"name": " / ".join(chosen[:2]), "terms": chosen[:5], "size": len(rows)}
+
+
 def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     try:
         import numpy as np
@@ -117,7 +158,7 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     """).fetchall()
 
     if not rows:
-        return {"points": [], "edges": [], "n_clusters": 0, "variance_explained": []}
+        return {"points": [], "edges": [], "n_clusters": 0, "clusters": [], "variance_explained": []}
 
     vectors = np.array([json.loads(r["vector_json"]) for r in rows], dtype=np.float32)
 
@@ -163,11 +204,19 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
         }
         for i, r in enumerate(rows)
     ]
+    cluster_rows: dict[int, list[sqlite3.Row]] = {cluster_id: [] for cluster_id in range(n_clusters)}
+    for i, row in enumerate(rows):
+        cluster_rows[cluster_ids[i]].append(row)
+    clusters = [
+        {"id": cluster_id, **_cluster_name_from_rows(cluster_rows[cluster_id])}
+        for cluster_id in range(n_clusters)
+    ]
 
     return {
         "points": points,
         "edges": [list(e) for e in edge_set],
         "n_clusters": n_clusters,
+        "clusters": clusters,
         "variance_explained": pca.explained_variance_ratio_.tolist(),
     }
 

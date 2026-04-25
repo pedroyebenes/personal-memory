@@ -12,6 +12,7 @@ from app.web import APIError, RefreshState, _error_payload, _read_web_asset, han
 
 def test_web_assets_are_split_and_linked() -> None:
     html = _read_web_asset("index.html")
+    viz_html = _read_web_asset("viz.html")
     css = _read_web_asset("styles.css")
     js = _read_web_asset("app.js")
 
@@ -22,6 +23,21 @@ def test_web_assets_are_split_and_linked() -> None:
     assert ".layout" in css
     assert "function renderAnswerWorkspaces" in js
     assert "top_k: readTopK()" in js
+    assert 'id="viz-search"' in viz_html
+    assert 'id="label-lines"' in viz_html
+
+
+def test_viz_api_returns_named_clusters(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get("/api/viz", settings, RefreshState(), with_connection)
+
+    assert int(status) == 200
+    assert payload["points"]
+    assert payload["clusters"]
+    assert payload["clusters"][0]["name"]
+    assert payload["clusters"][0]["size"] > 0
 
 
 def test_status_reports_config_diagnostics(tmp_path: Path) -> None:

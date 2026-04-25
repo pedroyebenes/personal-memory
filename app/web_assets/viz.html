@@ -10,7 +10,13 @@
     body { background: #12121f; color: #d8d8e8; font-family: Georgia, serif; overflow: hidden; }
 
     #canvas-container { position: fixed; inset: 0; }
+    #label-lines { position: fixed; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
     #label-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+    .label-line, .label-dot {
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+    .label-line.visible, .label-dot.visible { opacity: 0.85; }
 
     /* ── Floating labels ── */
     .point-label {
@@ -30,22 +36,9 @@
       pointer-events: none;
       user-select: none;
       backdrop-filter: blur(3px);
-      transform: translate(10px, -50%);
       will-change: left, top, opacity;
       opacity: 0;
       transition: opacity 120ms ease;
-    }
-    .point-label::before {
-      content: "";
-      position: absolute;
-      left: -7px;
-      top: 50%;
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: currentColor;
-      transform: translateY(-50%);
-      box-shadow: 0 0 8px currentColor;
     }
     .point-label.visible { opacity: 1; }
 
@@ -117,6 +110,14 @@
     }
     .legend-item.dimmed { opacity: 0.42; }
     .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .legend-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: inherit;
+    }
+    .legend-count { font-size: 0.66rem; color: #666; }
 
     /* ── Tooltip ── */
     #tooltip {
@@ -161,6 +162,7 @@
 </div>
 
 <div id="canvas-container"></div>
+<svg id="label-lines"></svg>
 <div id="label-layer"></div>
 
 <div id="sidebar">
@@ -229,6 +231,10 @@ const PALETTE = [
 
 function clusterColor(id) { return PALETTE[id % PALETTE.length]; }
 
+function clusterSummary(id) {
+  return vizData?.clusters?.find(c => c.id === id) || { id, name: `Cluster ${id + 1}`, size: 0 };
+}
+
 function conceptName(p) {
   if (p.section_title?.trim()) return p.section_title.trim();
   const words = p.snippet.trim().split(/\s+/);
@@ -239,7 +245,7 @@ function conceptName(p) {
 let scene, camera, renderer, controls;
 let pointsMesh, edgeLines;
 let vizData = null;
-let labelObjects = [];      // { el: HTMLElement, vec: THREE.Vector3 }
+let labelObjects = [];      // { el: HTMLElement, line: SVGLineElement, dot: SVGCircleElement, vec: THREE.Vector3 }
 let visibleSet = new Set();
 let maxLabels = 20;
 let frameIdx = 0;
@@ -382,12 +388,24 @@ function buildEdges(points, edges) {
 // ── Labels ─────────────────────────────────────────────────────
 function buildLabels(points) {
   const labelLayer = document.getElementById('label-layer');
+  const lineLayer = document.getElementById('label-lines');
   labelObjects = points.map(p => {
     const div = document.createElement('div');
     div.className = 'point-label';
     div.textContent = conceptName(p);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('class', 'label-line');
+    line.setAttribute('stroke', clusterColor(p.cluster_id));
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('stroke-linecap', 'round');
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('class', 'label-dot');
+    dot.setAttribute('r', '3');
+    dot.setAttribute('fill', clusterColor(p.cluster_id));
     labelLayer.appendChild(div);
-    return { el: div, vec: new THREE.Vector3(p.x, p.y, p.z) };
+    lineLayer.appendChild(line);
+    lineLayer.appendChild(dot);
+    return { el: div, line, dot, vec: new THREE.Vector3(p.x, p.y, p.z) };
   });
 }
 
@@ -490,13 +508,36 @@ function refreshLabels(force = false) {
   }
 
   for (const idx of visibleSet) {
-    if (!next.has(idx)) labelObjects[idx].el.classList.remove('visible');
+    if (!next.has(idx)) {
+      labelObjects[idx].el.classList.remove('visible');
+      labelObjects[idx].line.classList.remove('visible');
+      labelObjects[idx].dot.classList.remove('visible');
+    }
   }
   for (const item of accepted) {
-    const el = labelObjects[item.i].el;
-    el.style.left = `${Math.round(item.x)}px`;
-    el.style.top = `${Math.round(item.y)}px`;
+    const label = labelObjects[item.i];
+    const el = label.el;
+    const side = item.x < window.innerWidth * 0.66 ? 1 : -1;
+    const width = el.offsetWidth || 120;
+    const height = el.offsetHeight || 22;
+    let left = item.x + side * 16;
+    if (side < 0) left = item.x - width - 16;
+    left = Math.max(minX, Math.min(window.innerWidth - width - LABEL_MARGIN, left));
+    const top = Math.max(LABEL_MARGIN, Math.min(window.innerHeight - height - LABEL_MARGIN, item.y - height / 2));
+    const anchorX = side > 0 ? left : left + width;
+    const anchorY = top + height / 2;
+
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
     el.classList.add('visible');
+    label.line.setAttribute('x1', String(Math.round(item.x)));
+    label.line.setAttribute('y1', String(Math.round(item.y)));
+    label.line.setAttribute('x2', String(Math.round(anchorX)));
+    label.line.setAttribute('y2', String(Math.round(anchorY)));
+    label.dot.setAttribute('cx', String(Math.round(item.x)));
+    label.dot.setAttribute('cy', String(Math.round(item.y)));
+    label.line.classList.add('visible');
+    label.dot.classList.add('visible');
   }
   visibleSet = next;
 }
@@ -505,14 +546,26 @@ function refreshLabels(force = false) {
 function buildLegend(n) {
   const list = document.getElementById('legend-list');
   for (let i = 0; i < n; i++) {
+    const summary = clusterSummary(i);
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'legend-item';
     item.dataset.clusterId = String(i);
-    item.innerHTML = `
-      <div class="legend-swatch" style="background:${clusterColor(i)}"></div>
-      <span>Cluster ${i + 1}</span>
-    `;
+    const swatch = document.createElement('div');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = clusterColor(i);
+    const text = document.createElement('span');
+    text.className = 'legend-text';
+    const name = document.createElement('span');
+    name.className = 'legend-name';
+    name.textContent = summary.name || `Cluster ${i + 1}`;
+    const count = document.createElement('span');
+    count.className = 'legend-count';
+    count.textContent = `${summary.size.toLocaleString()} chunk${summary.size === 1 ? '' : 's'}`;
+    text.appendChild(name);
+    text.appendChild(count);
+    item.appendChild(swatch);
+    item.appendChild(text);
     item.addEventListener('click', () => {
       activeClusterId = activeClusterId === i ? null : i;
       updateLegendState();
