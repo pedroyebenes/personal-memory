@@ -8,11 +8,12 @@ from app.vault.obsidian_parser import infer_title, parse_markdown_file
 
 
 def test_frontmatter_parsing(fixture_vault: Path) -> None:
-    parsed = parse_markdown_file(fixture_vault / "project-note.md")
+    parsed, warnings = parse_markdown_file(fixture_vault / "project-note.md")
     assert parsed.title == "Project North Star"
     assert parsed.tags == ["project", "planning"]
     assert parsed.aliases == ["North Star", "Launch Plan"]
     assert parsed.normalized_text.startswith("# Overview")
+    assert warnings == []
 
 
 def test_title_inference_from_filename() -> None:
@@ -38,7 +39,7 @@ def test_frontmatter_dates_are_normalized_to_strings(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    parsed = parse_markdown_file(note)
+    parsed, _ = parse_markdown_file(note)
 
     assert parsed.frontmatter["created"] == "2026-04-22"
     assert parsed.frontmatter["metadata"]["reviewed"] == "2026-04-23"

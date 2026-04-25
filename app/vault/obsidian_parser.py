@@ -35,33 +35,73 @@ def _json_safe_frontmatter(value: Any) -> Any:
     return str(value)
 
 
-def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str, list[str]]:
     match = FRONTMATTER_PATTERN.match(text)
     if not match:
-        return {}, text
-    payload = yaml.safe_load(match.group(1)) or {}
+        return {}, text, []
+    warnings: list[str] = []
+    try:
+        payload = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as exc:
+        warnings.append(f"frontmatter YAML could not be parsed: {exc.__class__.__name__}")
+        return {}, text[match.end():], warnings
+    if payload is None:
+        return {}, text[match.end():], warnings
     if not isinstance(payload, dict):
-        payload = {}
-    return _json_safe_frontmatter(payload), text[match.end():]
+        warnings.append("frontmatter is not a mapping; ignoring")
+        return {}, text[match.end():], warnings
+    return _json_safe_frontmatter(payload), text[match.end():], warnings
 
 
 def _normalize_string_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()]
+        items = [value]
+    elif isinstance(value, list):
+        items = [str(item) for item in value if item is not None]
+    else:
+        items = [str(value)]
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        cleaned = item.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result
 
 
-def parse_markdown_file(path: Path) -> ParsedDocument:
+def _validated_title(value: Any) -> tuple[str | None, list[str]]:
+    if value is None:
+        return None, []
+    if isinstance(value, str):
+        return value.strip() or None, []
+    return None, ["frontmatter 'title' is not a string; using filename"]
+
+
+def parse_markdown_file(path: Path) -> tuple[ParsedDocument, list[str]]:
     raw_text = normalize_line_endings(path.read_text(encoding="utf-8"))
-    frontmatter, normalized_text = _extract_frontmatter(raw_text)
-    tags = _normalize_string_list(frontmatter.get("tags"))
-    aliases = _normalize_string_list(frontmatter.get("aliases"))
+    frontmatter, normalized_text, warnings = _extract_frontmatter(raw_text)
+
+    title_value, title_warnings = _validated_title(frontmatter.get("title"))
+    warnings.extend(title_warnings)
+
+    raw_tags = frontmatter.get("tags")
+    if raw_tags is not None and not isinstance(raw_tags, (str, list)):
+        warnings.append("frontmatter 'tags' is not a string or list; coercing")
+
+    raw_aliases = frontmatter.get("aliases")
+    if raw_aliases is not None and not isinstance(raw_aliases, (str, list)):
+        warnings.append("frontmatter 'aliases' is not a string or list; coercing")
+
+    tags = _normalize_string_list(raw_tags)
+    aliases = _normalize_string_list(raw_aliases)
+    if title_value is not None:
+        frontmatter["title"] = title_value
     title = infer_title(path, frontmatter)
-    return ParsedDocument(
+    document = ParsedDocument(
         source_path=path,
         title=title,
         raw_text=raw_text,
@@ -70,3 +110,4 @@ def parse_markdown_file(path: Path) -> ParsedDocument:
         tags=tags,
         aliases=aliases,
     )
+    return document, warnings

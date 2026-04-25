@@ -25,9 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     ingest_parser = subparsers.add_parser("ingest")
     ingest_parser.add_argument("--vault", required=False)
+    ingest_parser.add_argument("--include", action="append", default=None, help="glob to include (relative to vault)")
+    ingest_parser.add_argument("--exclude", action="append", default=None, help="glob to exclude (relative to vault)")
 
     reindex_parser = subparsers.add_parser("reindex")
     reindex_parser.add_argument("--vault", required=False)
+    reindex_parser.add_argument("--include", action="append", default=None, help="glob to include (relative to vault)")
+    reindex_parser.add_argument("--exclude", action="append", default=None, help="glob to exclude (relative to vault)")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("--query", required=True)
@@ -54,6 +58,13 @@ def _resolve_vault_arg(cli_value: str | None, config_value: Path | None) -> Path
     if config_value:
         return config_value
     raise SystemExit("Vault path must be provided via --vault, config.json, or VAULT_PATH.")
+
+
+def _apply_scope_overrides(settings, args) -> None:
+    if getattr(args, "include", None):
+        settings.ingest_include = tuple(args.include)
+    if getattr(args, "exclude", None):
+        settings.ingest_exclude = tuple(args.exclude)
 
 
 def main() -> None:
@@ -87,12 +98,20 @@ def main() -> None:
 
     if args.command == "ingest":
         vault_path = _resolve_vault_arg(args.vault, settings.vault_path)
-        print(json.dumps(ingest_vault(connection, vault_path, settings), indent=2))
+        _apply_scope_overrides(settings, args)
+        summary = ingest_vault(connection, vault_path, settings)
+        print(json.dumps(summary, indent=2))
+        if summary.get("failed"):
+            sys.exit(2)
         return
 
     if args.command == "reindex":
         vault_path = _resolve_vault_arg(args.vault, settings.vault_path)
-        print(json.dumps(reindex_vault(connection, vault_path, settings), indent=2))
+        _apply_scope_overrides(settings, args)
+        summary = reindex_vault(connection, vault_path, settings)
+        print(json.dumps(summary, indent=2))
+        if summary.get("failed"):
+            sys.exit(2)
         return
 
     if args.command == "search":

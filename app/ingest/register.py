@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Iterable
 
 from app.config import Settings
 from app.models import ChunkRecord, ParsedDocument
@@ -12,7 +13,7 @@ from app.util.hashing import sha256_text
 from app.util.logging import get_logger
 from app.util.timestamps import utc_now_iso
 from app.vault.obsidian_parser import parse_markdown_file
-from app.vault.scanner import scan_markdown_files
+from app.vault.scanner import ScannedFile, scan_markdown_entries
 
 LOGGER = get_logger(__name__)
 
@@ -51,15 +52,17 @@ def _record_run(
     return run_id
 
 
-def _prune_documents_not_in_vault(connection: sqlite3.Connection, current_paths: set[str]) -> int:
+def _prune_documents_not_in_vault(
+    connection: sqlite3.Connection, current_paths: set[str]
+) -> list[int]:
     rows = connection.execute("SELECT id, source_path FROM documents").fetchall()
     stale_ids = [int(row["id"]) for row in rows if row["source_path"] not in current_paths]
     if not stale_ids:
-        return 0
+        return []
     connection.executemany("DELETE FROM documents WHERE id = ?", [(document_id,) for document_id in stale_ids])
     connection.commit()
     LOGGER.info("Pruned %d stale documents from the index", len(stale_ids))
-    return len(stale_ids)
+    return stale_ids
 
 
 def _upsert_document(
@@ -67,6 +70,7 @@ def _upsert_document(
     parsed: ParsedDocument,
     content_hash: str,
     last_modified: str,
+    file_size: int,
 ) -> int:
     now = utc_now_iso()
     existing = _get_document_row(connection, str(parsed.source_path))
@@ -75,9 +79,9 @@ def _upsert_document(
             """
             INSERT INTO documents (
                 source_path, title, raw_text, normalized_text, frontmatter_json,
-                content_hash, last_modified, created_at, updated_at
+                content_hash, last_modified, file_size, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(parsed.source_path),
@@ -87,6 +91,7 @@ def _upsert_document(
                 json.dumps(parsed.frontmatter, sort_keys=True),
                 content_hash,
                 last_modified,
+                file_size,
                 now,
                 now,
             ),
@@ -98,7 +103,7 @@ def _upsert_document(
             """
             UPDATE documents
             SET title = ?, raw_text = ?, normalized_text = ?, frontmatter_json = ?,
-                content_hash = ?, last_modified = ?, updated_at = ?
+                content_hash = ?, last_modified = ?, file_size = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -108,6 +113,7 @@ def _upsert_document(
                 json.dumps(parsed.frontmatter, sort_keys=True),
                 content_hash,
                 last_modified,
+                file_size,
                 now,
                 document_id,
             ),
@@ -188,46 +194,97 @@ def _insert_embeddings(connection: sqlite3.Connection, chunk_ids: list[int], tex
     connection.commit()
 
 
-def _ingest_single_document(connection: sqlite3.Connection, path: Path, settings: Settings) -> tuple[str, int | None]:
-    parsed = parse_markdown_file(path)
-    content_hash = sha256_text(parsed.raw_text)
+def _ingest_single_document(
+    connection: sqlite3.Connection,
+    entry: ScannedFile,
+    settings: Settings,
+) -> tuple[str, int | None, list[str]]:
+    path = entry.path
     existing = _get_document_row(connection, str(path))
-    if existing is not None and existing["content_hash"] == content_hash:
-        LOGGER.info("Skipping unchanged file %s", path)
-        return "skipped", int(existing["id"])
+    if (
+        existing is not None
+        and existing["last_modified"] == entry.mtime_iso
+        and int(existing["file_size"] or 0) == entry.size
+    ):
+        LOGGER.info("Skipping unchanged file (mtime+size match) %s", path)
+        return "skipped", int(existing["id"]), []
 
-    last_modified = utc_now_iso()
-    document_id = _upsert_document(connection, parsed, content_hash, last_modified)
+    parsed, warnings = parse_markdown_file(path)
+    content_hash = sha256_text(parsed.raw_text)
+    if existing is not None and existing["content_hash"] == content_hash:
+        # File touched but content unchanged: refresh stat-side bookkeeping only.
+        connection.execute(
+            "UPDATE documents SET last_modified = ?, file_size = ?, updated_at = ? WHERE id = ?",
+            (entry.mtime_iso, entry.size, utc_now_iso(), int(existing["id"])),
+        )
+        connection.commit()
+        LOGGER.info("Skipping unchanged content for %s", path)
+        return "skipped", int(existing["id"]), warnings
+
+    document_id = _upsert_document(connection, parsed, content_hash, entry.mtime_iso, entry.size)
     _delete_document_chunks(connection, document_id)
     chunks = chunk_document(parsed.normalized_text)
     chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
     if chunk_ids:
         _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
     LOGGER.info("Indexed %s with %d chunks", path, len(chunk_ids))
-    return "indexed", document_id
+    return "indexed", document_id, warnings
+
+
+def _resolve_scope(settings: Settings) -> tuple[Iterable[str], Iterable[str]]:
+    return settings.ingest_include, settings.ingest_exclude
+
+
+def _build_failure(path: Path, exc: BaseException) -> dict[str, object]:
+    return {
+        "path": str(path),
+        "error_type": exc.__class__.__name__,
+        "error": str(exc),
+    }
 
 
 def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Settings) -> dict[str, object]:
     run_id = _record_run(connection, "ingest", vault_path, "running")
     counts = {"indexed": 0, "skipped": 0}
-    pruned = 0
+    failures: list[dict[str, object]] = []
+    warnings: list[dict[str, object]] = []
+    changed_document_ids: list[int] = []
+    removed_document_ids: list[int] = []
+    include, exclude = _resolve_scope(settings)
     try:
-        markdown_paths = scan_markdown_files(vault_path)
-        current_paths = {str(path) for path in markdown_paths}
-        pruned = _prune_documents_not_in_vault(connection, current_paths)
-        for path in markdown_paths:
-            status, _ = _ingest_single_document(connection, path, settings)
+        entries = scan_markdown_entries(vault_path, include=include, exclude=exclude)
+        current_paths = {str(entry.path) for entry in entries}
+        removed_document_ids = _prune_documents_not_in_vault(connection, current_paths)
+        for entry in entries:
+            try:
+                status, document_id, file_warnings = _ingest_single_document(connection, entry, settings)
+            except Exception as exc:  # noqa: BLE001 — capture per-file failures, keep ingest going
+                LOGGER.warning("Failed to ingest %s: %s", entry.path, exc)
+                failures.append(_build_failure(entry.path, exc))
+                continue
             counts[status] += 1
+            if status == "indexed" and document_id is not None:
+                changed_document_ids.append(document_id)
+            if file_warnings and document_id is not None:
+                warnings.append({"path": str(entry.path), "warnings": file_warnings})
     except Exception:
         _record_run(connection, "ingest", vault_path, "failed", counts["indexed"], run_id=run_id)
         raise
-    _record_run(connection, "ingest", vault_path, "completed", counts["indexed"], run_id=run_id)
+    final_status = "completed" if not failures else "completed_with_errors"
+    _record_run(connection, "ingest", vault_path, final_status, counts["indexed"], run_id=run_id)
     return {
         "run_id": run_id,
+        "status": final_status,
         "vault_path": str(vault_path),
         "indexed": counts["indexed"],
         "skipped": counts["skipped"],
-        "pruned": pruned,
+        "pruned": len(removed_document_ids),
+        "failed": len(failures),
+        "failures": failures,
+        "warnings": warnings,
+        "changed_document_ids": changed_document_ids,
+        "removed_document_ids": removed_document_ids,
+        "scope": {"include": list(include), "exclude": list(exclude)},
     }
 
 
@@ -242,22 +299,47 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
     connection.commit()
 
     indexed = 0
+    failures: list[dict[str, object]] = []
+    warnings: list[dict[str, object]] = []
+    changed_document_ids: list[int] = []
+    include, exclude = _resolve_scope(settings)
     try:
-        markdown_paths = scan_markdown_files(vault_path)
-        for path in markdown_paths:
-            parsed = parse_markdown_file(path)
-            content_hash = sha256_text(parsed.raw_text)
-            document_id = _upsert_document(connection, parsed, content_hash, utc_now_iso())
-            chunks = chunk_document(parsed.normalized_text)
-            chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
-            if chunk_ids:
-                _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
-            indexed += 1
+        entries = scan_markdown_entries(vault_path, include=include, exclude=exclude)
+        for entry in entries:
+            try:
+                parsed, file_warnings = parse_markdown_file(entry.path)
+                content_hash = sha256_text(parsed.raw_text)
+                document_id = _upsert_document(connection, parsed, content_hash, entry.mtime_iso, entry.size)
+                chunks = chunk_document(parsed.normalized_text)
+                chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
+                if chunk_ids:
+                    _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
+                indexed += 1
+                changed_document_ids.append(document_id)
+                if file_warnings:
+                    warnings.append({"path": str(entry.path), "warnings": file_warnings})
+            except Exception as exc:  # noqa: BLE001 — isolate per-file failures
+                LOGGER.warning("Failed to reindex %s: %s", entry.path, exc)
+                failures.append(_build_failure(entry.path, exc))
     except Exception:
         _record_run(connection, "reindex", vault_path, "failed", indexed, run_id=run_id)
         raise
-    _record_run(connection, "reindex", vault_path, "completed", indexed, run_id=run_id)
-    return {"run_id": run_id, "vault_path": str(vault_path), "indexed": indexed, "skipped": 0, "pruned": 0}
+    final_status = "completed" if not failures else "completed_with_errors"
+    _record_run(connection, "reindex", vault_path, final_status, indexed, run_id=run_id)
+    return {
+        "run_id": run_id,
+        "status": final_status,
+        "vault_path": str(vault_path),
+        "indexed": indexed,
+        "skipped": 0,
+        "pruned": 0,
+        "failed": len(failures),
+        "failures": failures,
+        "warnings": warnings,
+        "changed_document_ids": changed_document_ids,
+        "removed_document_ids": [],
+        "scope": {"include": list(include), "exclude": list(exclude)},
+    }
 
 
 def status_summary(connection: sqlite3.Connection) -> dict[str, object]:

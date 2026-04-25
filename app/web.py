@@ -438,7 +438,7 @@ def handle_api_post(
                 status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 details={"refresh_state": refresh_state.snapshot()},
             ) from exc
-        refresh_state.finish({"status": "completed", **summary})
+        refresh_state.finish(dict(summary))
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path != "/api/chat":
         raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)

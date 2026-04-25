@@ -49,6 +49,8 @@ class Settings:
     nvidia_api_key: str | None = None
     nvidia_base_url: str = DEFAULT_NVIDIA_BASE_URL
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    ingest_include: tuple[str, ...] = ()
+    ingest_exclude: tuple[str, ...] = ()
 
     def is_supported_provider(self, provider: str | None = None) -> bool:
         provider_name = (provider or self.llm_provider).strip().lower()
@@ -249,6 +251,18 @@ def _parse_positive_int(value: str | int | None, default: int, field_name: str) 
     return parsed
 
 
+def _parse_pattern_list(value: str | list | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        items = [item.strip() for item in value.split(",")]
+    elif isinstance(value, list):
+        items = [str(item).strip() for item in value]
+    else:
+        items = [str(value).strip()]
+    return tuple(item for item in items if item)
+
+
 def format_diagnostics(diagnostics: list[dict[str, str]]) -> list[str]:
     return [item["message"] for item in diagnostics]
 
@@ -276,6 +290,8 @@ def load_settings(config_path: str | None = None) -> Settings:
     nvidia_api_key = os.getenv("NVIDIA_API_KEY", file_values.get("NVIDIA_API_KEY"))
     nvidia_base_url = os.getenv("NVIDIA_BASE_URL", file_values.get("NVIDIA_BASE_URL"))
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", file_values.get("OLLAMA_BASE_URL"))
+    ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
+    ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
 
     vault_path = _coerce_path(os.getenv("VAULT_PATH"), resolve=True)
     if vault_path is None:
@@ -306,4 +322,6 @@ def load_settings(config_path: str | None = None) -> Settings:
         nvidia_api_key=nvidia_api_key,
         nvidia_base_url=nvidia_base_url or DEFAULT_NVIDIA_BASE_URL,
         ollama_base_url=ollama_base_url or DEFAULT_OLLAMA_BASE_URL,
+        ingest_include=_parse_pattern_list(ingest_include_value),
+        ingest_exclude=_parse_pattern_list(ingest_exclude_value),
     )
