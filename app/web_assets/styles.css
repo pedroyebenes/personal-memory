@@ -116,7 +116,7 @@
 
       .layout {
         display: grid;
-        grid-template-columns: minmax(250px, 0.35fr) minmax(0, 1fr);
+        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
         gap: 18px;
       }
 
@@ -130,6 +130,7 @@
 
       .chat-panel {
         padding: 18px;
+        min-height: 720px;
       }
 
       .left-rail {
@@ -138,13 +139,15 @@
         gap: 14px;
         align-content: start;
         min-height: 720px;
+        max-height: calc(100vh - 180px);
+        overflow-y: auto;
       }
 
       .answer-tabs {
         display: grid;
         gap: 8px;
         align-content: start;
-        max-height: 58vh;
+        max-height: 240px;
         overflow-y: auto;
         padding-right: 4px;
       }
@@ -278,13 +281,29 @@
         color: #0f5c56;
       }
 
-      .rail-pane {
+      .sidebar-section[hidden] {
         display: none;
       }
 
-      .rail-pane.active {
+      .main-view {
+        display: none;
+      }
+
+      .main-view.active {
         display: grid;
         gap: 14px;
+        align-content: start;
+      }
+
+      .main-view-header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+      }
+
+      .main-view-header h2 {
+        margin: 0;
+        font-size: 1.2rem;
+        color: var(--accent-3);
       }
 
       .composer {
@@ -460,6 +479,22 @@
         gap: 10px;
       }
 
+      .main-search-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+      }
+
+      .main-search-form input {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        padding: 13px 14px;
+        font: inherit;
+        background: rgba(255, 255, 255, 0.82);
+        color: inherit;
+      }
+
       .inline-form input,
       .inline-form textarea {
         width: 100%;
@@ -523,7 +558,7 @@
 
       .filter-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 1fr;
         gap: 10px;
       }
 
@@ -689,7 +724,8 @@
         .settings-grid,
         .filter-grid,
         .answer-meta-grid,
-        .provider-row {
+        .provider-row,
+        .main-search-form {
           grid-template-columns: 1fr;
         }
       }

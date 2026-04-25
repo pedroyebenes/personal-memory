@@ -32,35 +32,91 @@
 
       <section class="layout">
         <aside class="panel left-rail">
-          <div class="rail-tabs" role="tablist" aria-label="Workspace navigation">
-            <button id="answers-tab" class="rail-tab active" type="button" data-rail-tab="answers">Answers</button>
-            <button id="search-tab" class="rail-tab" type="button" data-rail-tab="search">Search</button>
-            <button id="concepts-tab" class="rail-tab" type="button" data-rail-tab="concepts">Concepts</button>
-            <button id="eval-tab" class="rail-tab" type="button" data-rail-tab="eval">Eval</button>
+          <div class="rail-tabs" role="tablist" aria-label="Main view navigation">
+            <button id="answers-tab" class="rail-tab active" type="button" data-main-view="answers">Answers</button>
+            <button id="search-tab" class="rail-tab" type="button" data-main-view="search">Search</button>
+            <button id="concepts-tab" class="rail-tab" type="button" data-main-view="concepts">Concepts</button>
+            <button id="eval-tab" class="rail-tab" type="button" data-main-view="eval">Eval</button>
           </div>
-          <section id="answers-pane" class="rail-pane active">
+
+          <section class="card sidebar-section" data-sidebar-view="answers">
+            <h2>Answer Workspaces</h2>
             <nav id="answer-tabs" class="answer-tabs" aria-label="Answers"></nav>
           </section>
-          <section id="search-pane" class="rail-pane">
-            <form id="search-form" class="inline-form">
-              <input id="search-query" type="text" placeholder="Keyword or concept">
-              <button class="secondary" id="search-button" type="submit">Search</button>
+
+          <details class="control-panel sidebar-section" data-sidebar-view="answers search" open>
+            <summary>Retrieval Settings</summary>
+            <form id="llm-form" class="control-body">
+              <div class="control-group">
+                <div class="control-group-title">Model & Retrieval</div>
+                <div class="provider-row">
+                  <select id="llm-provider">
+                    <option value="ollama">Ollama</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="nvidia">NVIDIA</option>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                  <input id="synthesis-model" type="text" placeholder="Model name">
+                </div>
+                <div id="provider-status" class="provider-status">Checking provider availability...</div>
+                <label>
+                  <input id="use-llm" type="checkbox">
+                  Use LLM synthesis for answers
+                </label>
+                <label>
+                  <input id="rewrite-query" type="checkbox">
+                  Rewrite query before retrieval
+                </label>
+                <label>
+                  <input id="rerank-results" type="checkbox">
+                  Rerank retrieved evidence
+                </label>
+                <label>
+                  <input id="concept-boost-results" type="checkbox">
+                  Boost concept matches
+                </label>
+                <label class="field">
+                  <span>Sources</span>
+                  <input id="top-k" type="number" min="1" step="1" value="5">
+                </label>
+              </div>
             </form>
-            <div id="search-results" class="search-results empty">No search results yet.</div>
-            <section class="card">
-              <h2>Saved Searches</h2>
-              <form id="saved-search-form" class="inline-form">
-                <input id="saved-search-name" type="text" placeholder="Save current query as">
-                <button class="secondary" id="save-search-button" type="submit">Save Search</button>
-              </form>
-              <div id="saved-searches" class="sources empty">No saved searches yet.</div>
+          </details>
+
+          <details class="control-panel sidebar-section" data-sidebar-view="answers search" open>
+            <summary>Filters</summary>
+            <section class="filter-panel" aria-label="Search filters">
+              <div class="filter-header">
+                <div id="active-filters" class="active-filters">No filters active.</div>
+                <button id="clear-filters" class="ghost" type="button">Clear</button>
+              </div>
+              <div class="filter-grid">
+                <label class="field">
+                  <span>Tags</span>
+                  <input id="filter-tags" type="text" placeholder="project, planning">
+                </label>
+                <label class="field">
+                  <span>Aliases</span>
+                  <input id="filter-aliases" type="text" placeholder="North Star">
+                </label>
+                <label class="field">
+                  <span>Vault path</span>
+                  <input id="filter-path-prefix" type="text" placeholder="books/ or projects/">
+                </label>
+                <label class="field">
+                  <span>Modified from</span>
+                  <input id="filter-date-from" type="date">
+                </label>
+                <label class="field">
+                  <span>Modified to</span>
+                  <input id="filter-date-to" type="date">
+                </label>
+              </div>
             </section>
-            <section class="card">
-              <h2>Recent Queries</h2>
-              <div id="recent-queries" class="sources empty">No recent queries yet.</div>
-            </section>
-          </section>
-          <section id="concepts-pane" class="rail-pane">
+          </details>
+
+          <details class="control-panel sidebar-section" data-sidebar-view="concepts" open>
+            <summary>Concepts</summary>
             <form id="concepts-form" class="inline-form">
               <input id="concept-search" type="text" placeholder="Filter concepts">
               <select id="concept-type">
@@ -77,9 +133,10 @@
               <input id="concept-method" type="text" placeholder="method: alias, tag, body_phrase">
               <button class="secondary" id="concepts-button" type="submit">List</button>
             </form>
-            <div id="concept-results" class="sources empty">No concepts loaded yet.</div>
-          </section>
-          <section id="eval-pane" class="rail-pane">
+          </details>
+
+          <details class="control-panel sidebar-section" data-sidebar-view="eval" open>
+            <summary>Retrieval Eval</summary>
             <form id="eval-form" class="inline-form">
               <textarea id="eval-cases" class="small-textarea" spellcheck="false"></textarea>
               <label>
@@ -92,91 +149,58 @@
               </label>
               <button class="secondary" id="eval-button" type="submit">Run Checks</button>
             </form>
-            <div id="eval-results" class="sources empty">No retrieval checks have run.</div>
+          </details>
+
+          <section class="card sidebar-section" data-sidebar-view="search">
+            <h2>Saved Searches</h2>
+            <form id="saved-search-form" class="inline-form">
+              <input id="saved-search-name" type="text" placeholder="Save current query as">
+              <button class="secondary" id="save-search-button" type="submit">Save Search</button>
+            </form>
+            <div id="saved-searches" class="sources empty">No saved searches yet.</div>
+          </section>
+
+          <section class="card sidebar-section" data-sidebar-view="search">
+            <h2>Recent Queries</h2>
+            <div id="recent-queries" class="sources empty">No recent queries yet.</div>
           </section>
         </aside>
 
         <div class="panel chat-panel">
-          <form id="chat-form" class="composer">
-            <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
-            <button id="send-button" type="submit">Ask</button>
-          </form>
-          <div class="control-grid">
-            <details class="control-panel">
-              <summary>Settings</summary>
-              <form id="llm-form" class="control-body">
-                <div class="settings-grid">
-                  <div class="control-group">
-                    <div class="control-group-title">Model & Retrieval</div>
-                    <div class="provider-row">
-                      <select id="llm-provider">
-                        <option value="ollama">Ollama</option>
-                        <option value="gemini">Gemini</option>
-                        <option value="nvidia">NVIDIA</option>
-                        <option value="openai">OpenAI</option>
-                      </select>
-                      <input id="synthesis-model" type="text" placeholder="Model name">
-                    </div>
-                    <div id="provider-status" class="provider-status">Checking provider availability...</div>
-                    <label>
-                      <input id="use-llm" type="checkbox">
-                      Use LLM synthesis for answers
-                    </label>
-                    <label>
-                      <input id="rewrite-query" type="checkbox">
-                      Rewrite query before retrieval
-                    </label>
-                    <label>
-                      <input id="rerank-results" type="checkbox">
-                      Rerank retrieved evidence
-                    </label>
-                    <label>
-                      <input id="concept-boost-results" type="checkbox">
-                      Boost concept matches
-                    </label>
-                    <label class="field">
-                      <span>Sources</span>
-                      <input id="top-k" type="number" min="1" step="1" value="5">
-                    </label>
-                  </div>
-                  <div class="control-group">
-                    <div class="control-group-title">Filters</div>
-                    <section class="filter-panel" aria-label="Search filters">
-                      <div class="filter-header">
-                        <div id="active-filters" class="active-filters">No filters active.</div>
-                        <button id="clear-filters" class="ghost" type="button">Clear</button>
-                      </div>
-                      <div class="filter-grid">
-                        <label class="field">
-                          <span>Tags</span>
-                          <input id="filter-tags" type="text" placeholder="project, planning">
-                        </label>
-                        <label class="field">
-                          <span>Aliases</span>
-                          <input id="filter-aliases" type="text" placeholder="North Star">
-                        </label>
-                        <label class="field">
-                          <span>Vault path</span>
-                          <input id="filter-path-prefix" type="text" placeholder="books/ or projects/">
-                        </label>
-                        <label class="field">
-                          <span>Modified from</span>
-                          <input id="filter-date-from" type="date">
-                        </label>
-                        <label class="field">
-                          <span>Modified to</span>
-                          <input id="filter-date-to" type="date">
-                        </label>
-                      </div>
-                    </section>
-                  </div>
-                </div>
-              </form>
-            </details>
-          </div>
-          <article id="answer-detail" class="answer-detail empty-state">
-            <div>Ask a question to create an answer workspace.</div>
-          </article>
+          <section id="answers-view" class="main-view active">
+            <form id="chat-form" class="composer">
+              <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
+              <button id="send-button" type="submit">Ask</button>
+            </form>
+            <article id="answer-detail" class="answer-detail empty-state">
+              <div>Ask a question to create an answer workspace.</div>
+            </article>
+          </section>
+
+          <section id="search-view" class="main-view">
+            <header class="main-view-header">
+              <h2>Search Results</h2>
+            </header>
+            <form id="search-form" class="main-search-form">
+              <input id="search-query" type="text" placeholder="Keyword or concept">
+              <button class="secondary" id="search-button" type="submit">Search</button>
+            </form>
+            <div id="search-results" class="search-results empty">No search results yet.</div>
+          </section>
+
+          <section id="concepts-view" class="main-view">
+            <header class="main-view-header">
+              <h2>Concepts</h2>
+            </header>
+            <div id="concept-results" class="sources empty">No concepts loaded yet.</div>
+          </section>
+
+          <section id="eval-view" class="main-view">
+            <header class="main-view-header">
+              <h2>Retrieval Checks</h2>
+            </header>
+            <div id="eval-results" class="sources empty">No retrieval checks have run.</div>
+          </section>
         </div>
       </section>
     </main>

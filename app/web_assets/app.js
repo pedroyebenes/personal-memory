@@ -7,13 +7,14 @@
       const answerTabs = document.getElementById("answer-tabs");
       const answerDetail = document.getElementById("answer-detail");
       const warnings = document.getElementById("warnings");
-      const railTabButtons = Array.from(document.querySelectorAll("[data-rail-tab]"));
-      const railPanes = {
-        answers: document.getElementById("answers-pane"),
-        search: document.getElementById("search-pane"),
-        concepts: document.getElementById("concepts-pane"),
-        eval: document.getElementById("eval-pane"),
+      const mainViewButtons = Array.from(document.querySelectorAll("[data-main-view]"));
+      const mainViews = {
+        answers: document.getElementById("answers-view"),
+        search: document.getElementById("search-view"),
+        concepts: document.getElementById("concepts-view"),
+        eval: document.getElementById("eval-view"),
       };
+      const sidebarSections = Array.from(document.querySelectorAll("[data-sidebar-view]"));
       const searchForm = document.getElementById("search-form");
       const searchQueryInput = document.getElementById("search-query");
       const searchButton = document.getElementById("search-button");
@@ -156,11 +157,15 @@
       }
 
       function switchRailTab(name) {
-        for (const button of railTabButtons) {
-          button.classList.toggle("active", button.dataset.railTab === name);
+        for (const button of mainViewButtons) {
+          button.classList.toggle("active", button.dataset.mainView === name);
         }
-        for (const [paneName, pane] of Object.entries(railPanes)) {
-          pane.classList.toggle("active", paneName === name);
+        for (const [viewName, view] of Object.entries(mainViews)) {
+          view.classList.toggle("active", viewName === name);
+        }
+        for (const section of sidebarSections) {
+          const views = (section.dataset.sidebarView || "").split(/\s+/).filter(Boolean);
+          section.hidden = !views.includes(name);
         }
       }
 
@@ -972,8 +977,8 @@
         input.addEventListener("input", renderActiveFilters);
       }
       topKInput.addEventListener("change", () => setTopK(topKInput.value));
-      for (const button of railTabButtons) {
-        button.addEventListener("click", () => switchRailTab(button.dataset.railTab));
+      for (const button of mainViewButtons) {
+        button.addEventListener("click", () => switchRailTab(button.dataset.mainView));
       }
 
       loadStatus();
@@ -983,3 +988,4 @@
       providerSelect.addEventListener("change", syncProviderState);
       renderAnswerWorkspaces();
       renderActiveFilters();
+      switchRailTab("answers");

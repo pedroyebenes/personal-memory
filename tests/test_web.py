@@ -29,8 +29,20 @@ def test_web_assets_are_split_and_linked() -> None:
     assert "vault path:" in js
     assert 'id="concepts-tab"' in html
     assert 'id="eval-tab"' in html
+    assert 'id="search-view"' in html
+    assert 'id="concepts-view"' in html
+    assert 'id="eval-view"' in html
+    assert '<form id="search-form" class="main-search-form">' in html
+    assert 'id="search-pane"' not in html
+    assert 'id="concepts-pane"' not in html
     assert 'id="concept-boost-results"' in html
     assert 'id="eval-cases"' in html
+    assert 'data-sidebar-view="answers search"' in html
+    assert 'data-sidebar-view="concepts"' in html
+    assert 'data-sidebar-view="eval"' in html
+    assert "const sidebarSections" in js
+    assert "section.hidden = !views.includes(name)" in js
+    assert ".sidebar-section[hidden]" in css
     assert 'id="viz-search"' in viz_html
     assert 'id="label-lines"' in viz_html
 
