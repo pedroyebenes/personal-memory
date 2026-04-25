@@ -23,12 +23,64 @@ from pathlib import Path
 from app.models import ChunkRecord, ParsedDocument
 
 WIKILINK_PATTERN = re.compile(r"\[\[([^\[\]\|]+)(?:\|([^\[\]]+))?\]\]")
+INLINE_TAG_PATTERN = re.compile(r"(?<![\w/])#([A-Za-z][A-Za-z0-9_/-]{1,80})")
+EMPHASIS_PATTERN = re.compile(r"(?<!\*)\*\*([^*\n]{3,120})\*\*(?!\*)|(?<!\w)_([^_\n]{3,120})_(?!\w)")
+DEFINITION_PATTERN = re.compile(
+    r"(?m)^\s*(?:[-*]\s+)?([A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*(?:[ \t]+[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*){0,5})[ \t]+"
+    r"(?:is|means|refers to|describes|es|significa|se refiere a|describe)[ \t]+.{8,}"
+)
+COLON_DEFINITION_PATTERN = re.compile(
+    r"(?m)^\s*(?:[-*]\s+)?([A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*(?:[ \t]+[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*){0,5})[ \t]*:[ \t]+.{8,}"
+)
+CAPITALIZED_PHRASE_PATTERN = re.compile(
+    r"\b([A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*(?:[ \t]+[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*){1,5})\b"
+)
 _WHITESPACE = re.compile(r"\s+")
+_MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]+\]\([^)]+\)")
+_CODE_SPAN_PATTERN = re.compile(r"`[^`]+`")
+_MAX_BODY_MENTIONS_PER_CHUNK = 24
+_BODY_MIN_OCCURRENCES = 2
+_BODY_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "but",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "of",
+    "on",
+    "or",
+    "the",
+    "this",
+    "to",
+    "with",
+}
+_BODY_STOP_PHRASES = {
+    "table of contents",
+    "copyright",
+    "all rights reserved",
+    "public domain",
+}
 _STRUCTURAL_LABEL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\d+$"),
     re.compile(r"^[ivxlcdm]+$"),
     re.compile(r"^\d{4}\s+\d{1,2}\s+\d{1,2}$"),
     re.compile(r"^.+\.(?:md|txt|html|xhtml|xml)$"),
+    re.compile(
+        r"^(?:cap[ií]tulo|chapter|part|parte|book|libro|section|secci[oó]n)\s+"
+        r"(?:[ivxlcdm]+|\d+|primero|segundo|tercero|cuarto|quinto|sexto|s[eé]ptimo|octavo|noveno|d[eé]cimo)"
+        r"(?:\b|[.:])"
+    ),
     re.compile(
         r"^(?:cap[ií]tulo|chapter|part|parte|book|libro|section|secci[oó]n)\s+"
         r"(?:[ivxlcdm]+|\d+|primero|segundo|tercero|cuarto|quinto|sexto|s[eé]ptimo|octavo|noveno|d[eé]cimo)$"
@@ -44,6 +96,10 @@ EXTRACTION_METHODS: tuple[str, ...] = (
     "heading",
     "title",
     "filename",
+    "inline_tag",
+    "emphasis",
+    "definition",
+    "body_phrase",
 )
 
 
@@ -89,6 +145,38 @@ def _make_mention(name: str, mention_text: str, method: str, chunk_index: int) -
     )
 
 
+def _clean_body_label(value: str) -> str:
+    cleaned = value.strip()
+    cleaned = re.sub(r"^[#*_`~\s:;,.!?()\[\]{}<>\"'“”‘’]+", "", cleaned)
+    cleaned = re.sub(r"[#*_`~\s:;,.!?()\[\]{}<>\"'“”‘’]+$", "", cleaned)
+    return _WHITESPACE.sub(" ", cleaned).strip()
+
+
+def _is_good_body_label(value: str) -> bool:
+    cleaned = _clean_body_label(value)
+    key = normalize_key(cleaned)
+    if not key or key in _BODY_STOP_PHRASES:
+        return False
+    words = key.split()
+    if len(words) > 6:
+        return False
+    if len(words) == 1 and (len(words[0]) < 3 or words[0] in _BODY_STOPWORDS):
+        return False
+    if all(word in _BODY_STOPWORDS for word in words):
+        return False
+    if not any(char.isalpha() for char in cleaned):
+        return False
+    if classify_entity_type(cleaned, "heading") == "structure":
+        return False
+    return True
+
+
+def _strip_markup_for_body_phrases(text: str) -> str:
+    without_links = _MARKDOWN_LINK_PATTERN.sub(" ", text)
+    without_code = _CODE_SPAN_PATTERN.sub(" ", without_links)
+    return WIKILINK_PATTERN.sub(" ", without_code)
+
+
 def _filename_concept(path: Path) -> str:
     stem = path.stem.replace("_", " ").replace("-", " ").strip()
     return stem
@@ -103,6 +191,80 @@ def _extract_wikilinks(chunks: list[ChunkRecord]) -> list[ConceptMention]:
             mention = _make_mention(target, display, "wikilink", index)
             if mention:
                 mentions.append(mention)
+    return mentions
+
+
+def _extract_inline_tags(chunks: list[ChunkRecord]) -> list[ConceptMention]:
+    mentions: list[ConceptMention] = []
+    for index, chunk in enumerate(chunks):
+        for match in INLINE_TAG_PATTERN.finditer(chunk.text):
+            label = match.group(1).replace("/", " ")
+            mention = _make_mention(label, f"#{match.group(1)}", "inline_tag", index)
+            if mention:
+                mentions.append(mention)
+    return mentions
+
+
+def _extract_emphasis(chunks: list[ChunkRecord]) -> list[ConceptMention]:
+    mentions: list[ConceptMention] = []
+    for index, chunk in enumerate(chunks):
+        for match in EMPHASIS_PATTERN.finditer(chunk.text):
+            label = _clean_body_label(match.group(1) or match.group(2) or "")
+            if not _is_good_body_label(label):
+                continue
+            mention = _make_mention(label, label, "emphasis", index)
+            if mention:
+                mentions.append(mention)
+    return mentions
+
+
+def _extract_definitions(chunks: list[ChunkRecord]) -> list[ConceptMention]:
+    mentions: list[ConceptMention] = []
+    for index, chunk in enumerate(chunks):
+        for pattern in (DEFINITION_PATTERN, COLON_DEFINITION_PATTERN):
+            for match in pattern.finditer(chunk.text):
+                label = _clean_body_label(match.group(1))
+                if not _is_good_body_label(label):
+                    continue
+                mention = _make_mention(label, label, "definition", index)
+                if mention:
+                    mentions.append(mention)
+    return mentions
+
+
+def _extract_body_phrases(chunks: list[ChunkRecord]) -> list[ConceptMention]:
+    candidates: dict[str, dict[str, object]] = {}
+    for index, chunk in enumerate(chunks):
+        seen_in_chunk: set[str] = set()
+        text = _strip_markup_for_body_phrases(chunk.text)
+        for match in CAPITALIZED_PHRASE_PATTERN.finditer(text):
+            label = _clean_body_label(match.group(1))
+            if not _is_good_body_label(label):
+                continue
+            key = normalize_key(label)
+            bucket = candidates.setdefault(
+                key,
+                {"canonical": label, "occurrences": 0, "chunk_indexes": set()},
+            )
+            bucket["occurrences"] = int(bucket["occurrences"]) + 1
+            if key not in seen_in_chunk:
+                bucket["chunk_indexes"].add(index)
+                seen_in_chunk.add(key)
+
+    mentions: list[ConceptMention] = []
+    per_chunk_counts: dict[int, int] = {}
+    for key in sorted(candidates):
+        bucket = candidates[key]
+        if int(bucket["occurrences"]) < _BODY_MIN_OCCURRENCES:
+            continue
+        canonical = str(bucket["canonical"])
+        for chunk_index in sorted(bucket["chunk_indexes"]):
+            if per_chunk_counts.get(chunk_index, 0) >= _MAX_BODY_MENTIONS_PER_CHUNK:
+                continue
+            mention = _make_mention(canonical, canonical, "body_phrase", chunk_index)
+            if mention:
+                mentions.append(mention)
+                per_chunk_counts[chunk_index] = per_chunk_counts.get(chunk_index, 0) + 1
     return mentions
 
 
@@ -158,4 +320,8 @@ def extract_concept_mentions(parsed: ParsedDocument, chunks: list[ChunkRecord]) 
 
     mentions.extend(_extract_wikilinks(chunks))
     mentions.extend(_extract_headings(chunks))
+    mentions.extend(_extract_inline_tags(chunks))
+    mentions.extend(_extract_emphasis(chunks))
+    mentions.extend(_extract_definitions(chunks))
+    mentions.extend(_extract_body_phrases(chunks))
     return mentions

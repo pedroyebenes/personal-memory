@@ -55,6 +55,7 @@ def test_normalize_key_collapses_case_and_separators() -> None:
 
 def test_classify_entity_type_splits_structures_from_concepts() -> None:
     assert classify_entity_type("CAPÍTULO XL", "heading") == "structure"
+    assert classify_entity_type("Capítulo XLII. Que trata de la venta", "heading") == "structure"
     assert classify_entity_type("2026-04-20", "title") == "structure"
     assert classify_entity_type("2", "heading") == "structure"
     assert classify_entity_type("IV", "heading") == "structure"
@@ -142,6 +143,90 @@ def test_extract_concept_mentions_marks_structural_headings(tmp_path: Path) -> N
     assert by_key["research agenda"] == "concept"
 
 
+def test_extract_concept_mentions_adds_body_text_candidates(tmp_path: Path) -> None:
+    chunks = [
+        _make_chunk(
+            0,
+            "Notes",
+            (
+                "Project Atlas is the planning system for research notes. "
+                "The team uses **retrieval quality** reviews and #research/llms tags."
+            ),
+        ),
+        _make_chunk(
+            1,
+            "Followups",
+            "Project Atlas depends on OpenAI API traces. OpenAI API traces guide evaluation.",
+        ),
+    ]
+    parsed = _doc(tmp_path / "meeting.md", title="Meeting Notes")
+
+    mentions = extract_concept_mentions(parsed, chunks)
+    by_method: dict[str, set[str]] = {}
+    for mention in mentions:
+        by_method.setdefault(mention.extraction_method, set()).add(mention.normalized_key)
+
+    assert "project atlas" in by_method["definition"]
+    assert "retrieval quality" in by_method["emphasis"]
+    assert "research llms" in by_method["inline_tag"]
+    assert "project atlas" in by_method["body_phrase"]
+    assert "openai api" in by_method["body_phrase"]
+    assert all(mention.entity_type == "concept" for mention in mentions if mention.extraction_method in {"definition", "emphasis", "inline_tag", "body_phrase"})
+
+
+def test_definition_extraction_accepts_spanish_markers(tmp_path: Path) -> None:
+    chunks = [_make_chunk(0, "Notas", "Dulcinea Toboso es una figura idealizada en la novela.")]
+    parsed = _doc(tmp_path / "book.md", title="Book")
+
+    mentions = extract_concept_mentions(parsed, chunks)
+    definition_keys = {
+        mention.normalized_key
+        for mention in mentions
+        if mention.extraction_method == "definition"
+    }
+
+    assert "dulcinea toboso" in definition_keys
+
+
+def test_body_phrase_extraction_requires_repeated_evidence(tmp_path: Path) -> None:
+    chunks = [
+        _make_chunk(0, "Notes", "Single Mention appears only once."),
+        _make_chunk(1, "Followups", "Different Topic appears only once too."),
+    ]
+    parsed = _doc(tmp_path / "meeting.md", title="Meeting Notes")
+
+    mentions = extract_concept_mentions(parsed, chunks)
+    body_keys = {
+        mention.normalized_key
+        for mention in mentions
+        if mention.extraction_method == "body_phrase"
+    }
+
+    assert "single mention" not in body_keys
+    assert "different topic" not in body_keys
+
+
+def test_body_text_extraction_filters_structures_and_stopwords(tmp_path: Path) -> None:
+    chunks = [
+        _make_chunk(
+            0,
+            "Body",
+            "CAPÍTULO XL is a heading. CAPÍTULO XL appears again. **the** is ignored.",
+        )
+    ]
+    parsed = _doc(tmp_path / "book.md", title="Book")
+
+    mentions = extract_concept_mentions(parsed, chunks)
+    body_keys = {
+        mention.normalized_key
+        for mention in mentions
+        if mention.extraction_method in {"body_phrase", "emphasis", "definition"}
+    }
+
+    assert "capítulo xl" not in body_keys
+    assert "the" not in body_keys
+
+
 def test_extract_concept_mentions_preserves_filename_when_distinct(tmp_path: Path) -> None:
     chunks = [_make_chunk(0, None, "Body.")]
     parsed = _doc(tmp_path / "project_north_star.md", title="Untitled")
@@ -176,6 +261,36 @@ def test_ingest_populates_entities_and_mentions(connection, fixture_vault: Path,
     ).fetchall()
     assert {row["extraction_method"] for row in methods} >= {"title", "alias", "wikilink"}
     assert int(project["mention_count"]) >= 3
+
+
+def test_ingest_populates_body_text_concepts_with_provenance(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "meeting.md").write_text(
+        (
+            "# Meeting Notes\n\n"
+            "Project Atlas is the planning system for research notes. "
+            "The team uses **retrieval quality** reviews and #research/llms tags.\n\n"
+            "## Followups\n\n"
+            "Project Atlas depends on OpenAI API traces. OpenAI API traces guide evaluation.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    ingest_vault(connection, vault, settings)
+
+    atlas = find_concept(connection, name="Project Atlas")
+    assert atlas is not None
+    detail = get_concept_detail(connection, int(atlas["id"]))
+    assert detail is not None
+    methods = {mention["extraction_method"] for mention in detail["mentions"]}
+    assert {"definition", "body_phrase"} <= methods
+    assert all(mention["chunk_id"] > 0 for mention in detail["mentions"])
+
+    quality = find_concept(connection, name="retrieval quality")
+    assert quality is not None
+    tag = find_concept(connection, name="research llms")
+    assert tag is not None
 
 
 def test_changed_document_refresh_does_not_disturb_unrelated_mentions(
@@ -373,6 +488,45 @@ def test_refresh_concepts_rebuilds_from_existing_chunks(connection, fixture_vaul
         for row in connection.execute("SELECT normalized_key FROM entities").fetchall()
     }
     assert "project north star" in keys
+
+
+def test_refresh_concepts_is_idempotent_for_body_text_mentions(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "meeting.md").write_text(
+        (
+            "# Meeting Notes\n\n"
+            "Project Atlas is the planning system. Project Atlas improves retrieval quality. "
+            "**retrieval quality** is reviewed weekly. #research/llms\n"
+        ),
+        encoding="utf-8",
+    )
+    ingest_vault(connection, vault, settings)
+
+    first = refresh_concepts(connection)
+    first_rows = connection.execute(
+        """
+        SELECT e.normalized_key, em.extraction_method, c.chunk_index
+        FROM entity_mentions em
+        JOIN entities e ON e.id = em.entity_id
+        JOIN chunks c ON c.id = em.chunk_id
+        ORDER BY e.normalized_key, em.extraction_method, c.chunk_index
+        """
+    ).fetchall()
+
+    second = refresh_concepts(connection)
+    second_rows = connection.execute(
+        """
+        SELECT e.normalized_key, em.extraction_method, c.chunk_index
+        FROM entity_mentions em
+        JOIN entities e ON e.id = em.entity_id
+        JOIN chunks c ON c.id = em.chunk_id
+        ORDER BY e.normalized_key, em.extraction_method, c.chunk_index
+        """
+    ).fetchall()
+
+    assert second["mentions"] == first["mentions"]
+    assert [tuple(row) for row in second_rows] == [tuple(row) for row in first_rows]
 
 
 def test_concept_boost_surfaces_in_score_explanation(connection, fixture_vault: Path, settings: Settings) -> None:
