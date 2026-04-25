@@ -132,6 +132,65 @@
     .tt-doc     { font-size: 0.72rem; color: #666; margin-bottom: 7px; }
     .tt-text    { color: #b8b8cc; }
 
+    /* Pinned note (double-click) — stays until closed */
+    #note-popover {
+      position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
+      width: min(420px, calc(100vw - 32px - 248px));
+      max-height: min(80vh, 640px);
+      display: none; flex-direction: column; z-index: 40;
+      background: rgba(10, 10, 24, 0.98);
+      border: 1px solid rgba(158, 207, 184, 0.38);
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+      font-size: 0.78rem; line-height: 1.5; pointer-events: auto;
+    }
+    #note-popover.open { display: flex; }
+    .note-popover-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+      padding: 10px 10px 0 14px; flex-shrink: 0;
+    }
+    .note-popover-title { font-size: 0.88rem; color: #fff; font-weight: normal; min-width: 0; }
+    .note-popover-close {
+      flex-shrink: 0; width: 30px; height: 30px; margin: 0; padding: 0;
+      border: 0; border-radius: 5px; cursor: pointer;
+      background: rgba(255,255,255,0.06); color: #9ecfb8; font: 1.1rem/1 system-ui, sans-serif;
+    }
+    .note-popover-close:hover { background: rgba(255,255,255,0.1); }
+    .note-popover-body { padding: 6px 14px 14px; overflow-y: auto; flex: 1; min-height: 0; }
+    .note-popover-body .tt-doc  { font-size: 0.72rem; color: #666; margin-bottom: 4px; }
+    .np-path {
+      font-size: 0.66rem; color: #5a5a6e;
+      word-break: break-all;
+      margin-bottom: 8px;
+    }
+    .np-snippet-label { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: #555; margin-bottom: 4px; }
+    .note-popover-body .tt-text { color: #b8b8cc; white-space: pre-wrap; word-break: break-word; }
+    .np-read-row { margin-top: 12px; }
+    .np-read-btn {
+      width: 100%;
+      padding: 8px 10px; border-radius: 5px; cursor: pointer;
+      border: 1px solid rgba(158, 207, 184, 0.28);
+      background: rgba(158, 207, 184, 0.08);
+      color: #9ecfb8;
+      font: 0.75rem Georgia, serif;
+    }
+    .np-read-btn:hover { background: rgba(158, 207, 184, 0.14); }
+    .np-read-btn:disabled { opacity: 0.55; cursor: wait; }
+    #np-full {
+      display: none;
+      margin-top: 10px;
+      max-height: min(42vh, 360px);
+      overflow: auto;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.22);
+    }
+    #np-full.open { display: block; }
+    #np-full-text { font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c8c8d8; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    .np-full-status { font: 0.75rem Georgia, serif; color: #888; }
+    .np-full-error   { color: #e07878; }
+
     /* ── Overlays ── */
     .overlay {
       position: fixed; inset: 0; background: #12121f;
@@ -208,6 +267,26 @@
   <div class="tt-text"    id="tt-text"></div>
 </div>
 
+<div id="note-popover" role="dialog" aria-label="Note details">
+  <div class="note-popover-head">
+    <div class="note-popover-title" id="np-title"></div>
+    <button type="button" class="note-popover-close" id="np-close" aria-label="Close">×</button>
+  </div>
+  <div class="note-popover-body">
+    <div class="tt-doc" id="np-doc"></div>
+    <div class="np-path" id="np-path" aria-label="File path"></div>
+    <div class="np-snippet-label">Excerpt</div>
+    <div class="tt-text" id="np-text"></div>
+    <div class="np-read-row">
+      <button type="button" class="np-read-btn" id="np-read-toggle">Read full note</button>
+    </div>
+    <div id="np-full" role="region" aria-label="Full note text">
+      <div class="np-full-status" id="np-full-status" hidden></div>
+      <pre id="np-full-text" hidden></pre>
+    </div>
+  </div>
+</div>
+
 <script type="importmap">
 {
   "imports": {
@@ -251,6 +330,11 @@ let maxLabels = 20;
 let frameIdx = 0;
 let activeClusterId = null;
 let searchMatches = new Set();
+let notePopoverOpen = false;
+let hoverTooltipPending = null;
+let popoverDocumentId = null;
+let popoverFullExpanded = false;
+const fullNoteTextCache = new Map();
 const _tmp = new THREE.Vector3();
 const SIDEBAR_WIDTH = 248;
 const LABEL_MARGIN = 12;
@@ -281,6 +365,7 @@ async function main() {
   buildLegend(data.n_clusters);
   setupHover(data.points);
   setupUIControls();
+  document.getElementById('np-read-toggle').addEventListener('click', () => { toggleFullNote(); });
 
   document.getElementById('loading').style.display = 'none';
   animate();
@@ -585,20 +670,151 @@ function updateLegendState() {
   });
 }
 
+function resetNoteDocumentPanel() {
+  const full = document.getElementById('np-full');
+  const status = document.getElementById('np-full-status');
+  const pre = document.getElementById('np-full-text');
+  const btn = document.getElementById('np-read-toggle');
+  full.classList.remove('open');
+  status.hidden = true;
+  status.textContent = '';
+  status.className = 'np-full-status';
+  pre.hidden = true;
+  pre.textContent = '';
+  btn.textContent = 'Read full note';
+  btn.disabled = false;
+  popoverFullExpanded = false;
+}
+
+function openNotePopover(p) {
+  if (hoverTooltipPending) {
+    clearTimeout(hoverTooltipPending);
+    hoverTooltipPending = null;
+  }
+  resetNoteDocumentPanel();
+  popoverDocumentId = p.document_id ?? null;
+  const el = document.getElementById('note-popover');
+  document.getElementById('np-title').textContent = conceptName(p);
+  document.getElementById('np-doc').textContent = p.document_title || '';
+  const pathEl = document.getElementById('np-path');
+  if (p.source_path) {
+    pathEl.textContent = p.source_path;
+    pathEl.style.display = '';
+  } else {
+    pathEl.textContent = '';
+    pathEl.style.display = 'none';
+  }
+  document.getElementById('np-text').textContent = p.snippet || '';
+  const readBtn = document.getElementById('np-read-toggle');
+  if (popoverDocumentId == null) {
+    readBtn.disabled = true;
+    readBtn.title = 'Document id missing — refresh after updating the app';
+  } else {
+    readBtn.disabled = false;
+    readBtn.title = '';
+  }
+  el.classList.add('open');
+  notePopoverOpen = true;
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+async function toggleFullNote() {
+  if (popoverDocumentId == null) return;
+  if (popoverFullExpanded) {
+    document.getElementById('np-full').classList.remove('open');
+    popoverFullExpanded = false;
+    document.getElementById('np-read-toggle').textContent = 'Read full note';
+    return;
+  }
+  const full = document.getElementById('np-full');
+  const status = document.getElementById('np-full-status');
+  const pre = document.getElementById('np-full-text');
+  const btn = document.getElementById('np-read-toggle');
+  full.classList.add('open');
+  popoverFullExpanded = true;
+  btn.textContent = 'Hide full note';
+
+  if (fullNoteTextCache.has(popoverDocumentId)) {
+    pre.textContent = fullNoteTextCache.get(popoverDocumentId);
+    pre.hidden = false;
+    status.hidden = true;
+    return;
+  }
+  pre.hidden = true;
+  status.hidden = false;
+  status.className = 'np-full-status';
+  status.textContent = 'Loading…';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/documents/${popoverDocumentId}`);
+    const data = await res.json();
+    if (!data.ok) {
+      const msg = data.error && data.error.message;
+      throw new Error(typeof msg === 'string' ? msg : 'Could not load note');
+    }
+    const raw = data.raw_text ?? '';
+    fullNoteTextCache.set(popoverDocumentId, raw);
+    pre.textContent = raw;
+    pre.hidden = false;
+    status.hidden = true;
+  } catch (e) {
+    status.className = 'np-full-status np-full-error';
+    status.textContent = e instanceof Error ? e.message : 'Could not load note.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeNotePopover() {
+  document.getElementById('note-popover').classList.remove('open');
+  notePopoverOpen = false;
+  popoverDocumentId = null;
+  resetNoteDocumentPanel();
+}
+
 // ── Hover tooltip ──────────────────────────────────────────────
 function setupHover(points) {
   const raycaster = new THREE.Raycaster();
   raycaster.params.Points.threshold = 0.04;
   const mouse = new THREE.Vector2(-9, -9);
   const tooltip = document.getElementById('tooltip');
-  let pending = null;
+
+  function pickPoint(clientX, clientY) {
+    mouse.x =  (clientX / window.innerWidth)  * 2 - 1;
+    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObject(pointsMesh);
+    const hit = hits.find(item => pointPassesCluster(item.index));
+    return hit ? points[hit.index] : null;
+  }
+
+  renderer.domElement.addEventListener('dblclick', e => {
+    e.preventDefault();
+    const p = pickPoint(e.clientX, e.clientY);
+    if (p) openNotePopover(p);
+  });
+
+  document.getElementById('np-close').addEventListener('click', () => closeNotePopover());
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && notePopoverOpen) {
+      e.preventDefault();
+      closeNotePopover();
+    }
+  });
 
   renderer.domElement.addEventListener('mousemove', e => {
+    if (notePopoverOpen) {
+      tooltip.style.display = 'none';
+      return;
+    }
     mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
-    if (pending) clearTimeout(pending);
-    pending = setTimeout(() => {
+    if (hoverTooltipPending) clearTimeout(hoverTooltipPending);
+    hoverTooltipPending = setTimeout(() => {
+      hoverTooltipPending = null;
+      if (notePopoverOpen) return;
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObject(pointsMesh);
       const hit = hits.find(item => pointPassesCluster(item.index));

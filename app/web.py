@@ -151,7 +151,14 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
         ) from exc
 
     rows = conn.execute("""
-        SELECT c.id, c.text, c.section_title, d.title AS document_title, e.vector_json
+        SELECT
+            c.id,
+            c.text,
+            c.section_title,
+            d.id AS document_id,
+            d.source_path,
+            d.title AS document_title,
+            e.vector_json
         FROM chunks c
         JOIN documents d ON c.document_id = d.id
         JOIN embeddings e ON e.chunk_id = c.id
@@ -195,6 +202,8 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     points = [
         {
             "id": r["id"],
+            "document_id": r["document_id"],
+            "source_path": r["source_path"],
             "x": float(projected[i, 0]),
             "y": float(projected[i, 1]),
             "z": float(projected[i, 2]),
@@ -519,6 +528,43 @@ def handle_api_get(
                 "offset": offset,
             }
         )
+    if parsed.path.startswith("/api/documents/"):
+        suffix = parsed.path[len("/api/documents/") :].strip("/")
+        if not suffix:
+            raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
+        try:
+            document_id = int(suffix)
+        except ValueError as exc:
+            raise APIError(
+                "invalid_document_id",
+                "document id must be an integer.",
+                status=HTTPStatus.BAD_REQUEST,
+                details={"field": "document_id"},
+            ) from exc
+
+        def _load_document(connection: sqlite3.Connection) -> dict[str, object] | None:
+            row = connection.execute(
+                "SELECT id, source_path, title, raw_text FROM documents WHERE id = ?",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "document_id": int(row["id"]),
+                "source_path": str(row["source_path"]),
+                "title": str(row["title"]),
+                "raw_text": str(row["raw_text"]),
+            }
+
+        document = with_connection(_load_document)
+        if document is None:
+            raise APIError(
+                "document_not_found",
+                f"Document {document_id} was not found.",
+                status=HTTPStatus.NOT_FOUND,
+                details={"document_id": document_id},
+            )
+        return HTTPStatus.OK, _success_payload(document)
     if parsed.path.startswith("/api/concepts/"):
         suffix = parsed.path[len("/api/concepts/"):].strip("/")
         if not suffix:
