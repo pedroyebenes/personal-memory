@@ -21,6 +21,7 @@ from app.util.timestamps import utc_now_iso
 
 WEB_ASSET_CONTENT_TYPES = {
     "index.html": "text/html; charset=utf-8",
+    "viz.html": "text/html; charset=utf-8",
     "styles.css": "text/css; charset=utf-8",
     "app.js": "application/javascript; charset=utf-8",
 }
@@ -84,6 +85,90 @@ class RefreshState:
                 "last_completed_at": self._last_completed_at,
                 "last_result": self._last_result,
             }
+
+
+def _truncate(text: str, limit: int = 220) -> str:
+    flat = text.replace("\n", " ")
+    if len(flat) <= limit:
+        return flat
+    return flat[:limit].rsplit(" ", 1)[0] + "…"
+
+
+def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
+    try:
+        import numpy as np
+        from sklearn.cluster import MiniBatchKMeans
+        from sklearn.decomposition import PCA
+        from sklearn.neighbors import NearestNeighbors
+    except ImportError as exc:
+        raise APIError(
+            "missing_dependency",
+            "numpy and scikit-learn are required. Run: pip install numpy scikit-learn",
+            status=HTTPStatus.INTERNAL_SERVER_ERROR,
+        ) from exc
+
+    rows = conn.execute("""
+        SELECT c.id, c.text, c.section_title, d.title AS document_title, e.vector_json
+        FROM chunks c
+        JOIN documents d ON c.document_id = d.id
+        JOIN embeddings e ON e.chunk_id = c.id
+        ORDER BY d.title, c.chunk_index
+    """).fetchall()
+
+    if not rows:
+        return {"points": [], "edges": [], "n_clusters": 0, "variance_explained": []}
+
+    vectors = np.array([json.loads(r["vector_json"]) for r in rows], dtype=np.float32)
+
+    # PCA to 3D
+    n_components = min(3, vectors.shape[0], vectors.shape[1])
+    pca = PCA(n_components=n_components)
+    projected = pca.fit_transform(vectors)
+
+    scale = float(np.abs(projected).max())
+    if scale > 0:
+        projected = projected / scale
+
+    while projected.shape[1] < 3:
+        projected = np.column_stack([projected, np.zeros(len(projected), dtype=np.float32)])
+
+    # K-means clusters in 3D PCA space (fast, visually consistent)
+    n_clusters = max(5, min(20, int(len(rows) ** 0.5)))
+    n_clusters = min(n_clusters, len(rows))
+    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, n_init=3)
+    cluster_ids = kmeans.fit_predict(projected).tolist()
+
+    # Nearest-neighbor edges in 3D PCA space (k=3 per point)
+    k_nn = min(3, len(rows) - 1)
+    nn = NearestNeighbors(n_neighbors=k_nn + 1, algorithm="ball_tree")
+    nn.fit(projected)
+    _, indices = nn.kneighbors(projected)
+
+    edge_set: set[tuple[int, int]] = set()
+    for i, neighbors in enumerate(indices):
+        for j in neighbors[1:]:
+            edge_set.add((min(i, int(j)), max(i, int(j))))
+
+    points = [
+        {
+            "id": r["id"],
+            "x": float(projected[i, 0]),
+            "y": float(projected[i, 1]),
+            "z": float(projected[i, 2]),
+            "cluster_id": cluster_ids[i],
+            "document_title": r["document_title"],
+            "section_title": r["section_title"],
+            "snippet": _truncate(r["text"]),
+        }
+        for i, r in enumerate(rows)
+    ]
+
+    return {
+        "points": points,
+        "edges": [list(e) for e in edge_set],
+        "n_clusters": n_clusters,
+        "variance_explained": pca.explained_variance_ratio_.tolist(),
+    }
 
 
 def _success_payload(payload: dict[str, object]) -> dict[str, object]:
@@ -307,6 +392,9 @@ def handle_api_get(
         summary["top_k"] = settings.top_k
         summary["config_diagnostics"] = settings.validate()
         return HTTPStatus.OK, _success_payload(summary)
+    if parsed.path == "/api/viz":
+        data = with_connection(lambda conn: _compute_viz_data(conn))
+        return HTTPStatus.OK, _success_payload(data)
     if parsed.path == "/api/search":
         query_params = parse_qs(parsed.query)
         query = query_params.get("query", [""])[0].strip()
@@ -403,6 +491,9 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
                 parsed = urlparse(self.path)
                 if parsed.path == "/":
                     self._send_asset("index.html")
+                    return
+                if parsed.path == "/viz":
+                    self._send_asset("viz.html")
                     return
                 if parsed.path == "/static/styles.css":
                     self._send_asset("styles.css")
