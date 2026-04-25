@@ -18,8 +18,10 @@ def test_web_assets_are_split_and_linked() -> None:
     assert '<link rel="stylesheet" href="/static/styles.css">' in html
     assert '<script src="/static/app.js"></script>' in html
     assert "HTML_PAGE" not in html
+    assert 'id="top-k"' in html
     assert ".layout" in css
     assert "function renderAnswerWorkspaces" in js
+    assert "top_k: readTopK()" in js
 
 
 def test_status_reports_config_diagnostics(tmp_path: Path) -> None:
@@ -37,6 +39,7 @@ def test_status_reports_config_diagnostics(tmp_path: Path) -> None:
 
     assert int(status) == 200
     assert payload["ok"] is True
+    assert payload["top_k"] == 5
     diagnostics = payload["config_diagnostics"]
     assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
 

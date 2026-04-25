@@ -23,6 +23,7 @@
       const useLlmInput = document.getElementById("use-llm");
       const rewriteQueryInput = document.getElementById("rewrite-query");
       const rerankResultsInput = document.getElementById("rerank-results");
+      const topKInput = document.getElementById("top-k");
       const providerSelect = document.getElementById("llm-provider");
       const synthesisModelInput = document.getElementById("synthesis-model");
       const providerStatus = document.getElementById("provider-status");
@@ -64,6 +65,15 @@
         };
       }
 
+      function readTopK() {
+        const parsed = Number.parseInt(topKInput.value, 10);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+          topKInput.value = "1";
+          return 1;
+        }
+        return parsed;
+      }
+
       function setFilters(filters = {}) {
         filterTagsInput.value = (filters.tags || []).join(", ");
         filterAliasesInput.value = (filters.aliases || []).join(", ");
@@ -71,6 +81,12 @@
         filterDateFromInput.value = normalizeDateInput(filters.date_from);
         filterDateToInput.value = normalizeDateInput(filters.date_to);
         renderActiveFilters();
+      }
+
+      function setTopK(value) {
+        if (value === undefined || value === null || value === "") return;
+        const parsed = Number.parseInt(value, 10);
+        topKInput.value = Number.isFinite(parsed) && parsed >= 1 ? String(parsed) : "5";
       }
 
       function normalizeDateInput(value) {
@@ -183,7 +199,8 @@
           const filterSummary = document.createElement("div");
           filterSummary.className = "mini-meta";
           const labels = filterLabels(entry.filters || {});
-          filterSummary.textContent = labels.length ? labels.join(" · ") : "No filters";
+          const topKLabel = entry.top_k ? `sources: ${entry.top_k}` : "";
+          filterSummary.textContent = [labels.length ? labels.join(" · ") : "No filters", topKLabel].filter(Boolean).join(" · ");
           card.append(title, query, filterSummary);
           const actions = document.createElement("div");
           actions.className = "action-row";
@@ -195,6 +212,7 @@
             queryInput.value = entry.query;
             searchQueryInput.value = entry.query;
             setFilters(entry.filters || {});
+            setTopK(entry.top_k);
             switchRailTab("search");
           });
           const deleteButton = document.createElement("button");
@@ -246,6 +264,7 @@
         }
         refreshButton.disabled = !payload.refresh_available || Boolean(refreshState.in_progress);
         rerankResultsInput.checked = Boolean(payload.enable_reranking);
+        setTopK(payload.top_k);
         syncProviderOptions(payload.llm_provider || "ollama");
         const diagnosticWarnings = (payload.config_diagnostics || []).map((item) => item.message);
         if (refreshState.last_result?.status === "failed" && refreshState.last_result?.error) {
@@ -367,6 +386,7 @@
           model: synthesisModelInput.value.trim(),
           warnings: [],
           rerank: rerankResultsInput.checked,
+          top_k: readTopK(),
           created_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         };
         answerWorkspaces.unshift(workspace);
@@ -475,6 +495,7 @@
         appendMetaItem(metaGrid, "Provider", workspace.provider || "unknown");
         appendMetaItem(metaGrid, "Model", workspace.model || "default");
         appendMetaItem(metaGrid, "Rerank", workspace.rerank ? "on" : "off");
+        appendMetaItem(metaGrid, "Sources", workspace.top_k || workspace.sources.length);
         answerDetail.appendChild(metaGrid);
 
         renderDetailSection(answerDetail, `Sources (${workspace.sources.length})`, workspace.sources, (item) => createSourceCard(item), true);
@@ -593,6 +614,7 @@
               use_llm: useLlmInput.checked,
               rewrite_query: rewriteQueryInput.checked,
               rerank: rerankResultsInput.checked,
+              top_k: readTopK(),
               provider: providerSelect.value,
               model: synthesisModelInput.value.trim(),
               filters,
@@ -620,6 +642,7 @@
           workspace.model = payload.model || workspace.model;
           workspace.warnings = payload.warnings || [];
           workspace.rerank = Boolean(payload.rerank);
+          workspace.top_k = readTopK();
           renderAnswerWorkspaces();
         } catch (error) {
           workspace.status = "error";
@@ -639,6 +662,7 @@
         searchButton.disabled = true;
         try {
           const params = new URLSearchParams({ query });
+          params.set("top_k", String(readTopK()));
           appendFiltersToParams(params);
           if (rerankResultsInput.checked) params.set("rerank", "true");
           const response = await fetch(`/api/search?${params.toString()}`);
@@ -662,7 +686,7 @@
         const query = (searchQueryInput.value || queryInput.value).trim();
         if (!name || !query) return;
         const entries = loadStoredList(SAVED_SEARCHES_KEY).filter((item) => item.name !== name);
-        entries.unshift({ name, query, filters: readFilters() });
+        entries.unshift({ name, query, filters: readFilters(), top_k: readTopK() });
         saveStoredList(SAVED_SEARCHES_KEY, entries.slice(0, 8));
         savedSearchNameInput.value = "";
         renderSavedSearches();
@@ -672,6 +696,7 @@
       for (const input of [filterTagsInput, filterAliasesInput, filterPathPrefixInput, filterDateFromInput, filterDateToInput]) {
         input.addEventListener("input", renderActiveFilters);
       }
+      topKInput.addEventListener("change", () => setTopK(topKInput.value));
       for (const button of railTabButtons) {
         button.addEventListener("click", () => switchRailTab(button.dataset.railTab));
       }

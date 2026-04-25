@@ -304,6 +304,7 @@ def handle_api_get(
         summary["provider_defaults"] = settings.synthesis_model_defaults()
         summary["provider_availability"] = settings.provider_availability()
         summary["enable_reranking"] = settings.enable_reranking
+        summary["top_k"] = settings.top_k
         summary["config_diagnostics"] = settings.validate()
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/search":
