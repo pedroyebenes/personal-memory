@@ -51,15 +51,22 @@ HTML_PAGE = """<!doctype html>
       }
 
       .shell {
-        max-width: 1120px;
+        max-width: 1360px;
         margin: 0 auto;
-        padding: 32px 20px 48px;
+        padding: 24px 20px 48px;
       }
 
       .header {
         display: grid;
-        gap: 10px;
-        margin-bottom: 24px;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .header-main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 18px;
+        align-items: end;
       }
 
       .eyebrow {
@@ -83,10 +90,40 @@ HTML_PAGE = """<!doctype html>
         line-height: 1.6;
       }
 
+      .status-bar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .status-items {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(30, 42, 34, 0.06);
+        border: 1px solid var(--border);
+        color: var(--accent-3);
+        font-size: 0.86rem;
+        line-height: 1.25;
+      }
+
       .layout {
         display: grid;
-        grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
-        gap: 20px;
+        grid-template-columns: minmax(250px, 0.35fr) minmax(0, 1fr);
+        gap: 18px;
       }
 
       .panel {
@@ -101,56 +138,166 @@ HTML_PAGE = """<!doctype html>
         padding: 18px;
       }
 
-      .sidebar {
+      .left-rail {
         padding: 18px;
         display: grid;
-        gap: 16px;
+        gap: 14px;
         align-content: start;
+        min-height: 720px;
       }
 
-      .messages {
+      .answer-tabs {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+        max-height: 58vh;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+
+      .answer-tab {
+        display: grid;
+        gap: 5px;
+        width: 100%;
+        min-height: 72px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.64);
+        color: var(--ink);
+        padding: 10px 12px;
+        text-align: left;
+        align-self: stretch;
+      }
+
+      .answer-tab.active {
+        border-color: rgba(15, 118, 110, 0.42);
+        background: rgba(15, 118, 110, 0.1);
+      }
+
+      .answer-tab-title {
+        font-weight: 700;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+
+      .answer-tab-meta {
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.35;
+      }
+
+      .answer-detail {
         display: grid;
         gap: 14px;
-        min-height: 420px;
-        max-height: 68vh;
-        overflow-y: auto;
-        padding: 8px 4px 18px;
+        align-content: start;
+        min-width: 0;
+        min-height: 500px;
+        margin-top: 16px;
       }
 
-      .message {
-        border-radius: 18px;
-        padding: 14px 16px;
+      .answer-card {
         border: 1px solid var(--border);
-      }
-
-      .message.user {
-        background: rgba(15, 118, 110, 0.08);
-      }
-
-      .message.assistant {
+        border-radius: 16px;
         background: rgba(255, 255, 255, 0.72);
+        padding: 14px 16px;
       }
 
-      .role {
-        display: block;
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        color: var(--muted);
-        margin-bottom: 8px;
+      .answer-question {
+        font-size: 1.08rem;
+        font-weight: 700;
+        line-height: 1.35;
+        margin-bottom: 10px;
       }
 
-      .body {
+      .answer-text {
         white-space: pre-wrap;
         line-height: 1.55;
+        overflow-wrap: anywhere;
+      }
+
+      .answer-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .answer-meta-item {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 9px 10px;
+        background: rgba(30, 42, 34, 0.04);
+        color: var(--muted);
+        font-size: 0.86rem;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+
+      details.answer-section {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.62);
+        padding: 12px;
+      }
+
+      details.answer-section > summary {
+        cursor: pointer;
+        font-weight: 700;
+        color: var(--accent-3);
+      }
+
+      .answer-section-body {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .empty-state {
+        min-height: 300px;
+        border: 1px dashed var(--border);
+        border-radius: 16px;
+        align-content: center;
+        justify-items: center;
+        color: var(--muted);
+        padding: 24px;
+        text-align: center;
+      }
+
+      .rail-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .rail-tab {
+        min-height: 40px;
+        padding: 9px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.66);
+        color: var(--accent-3);
+        font-size: 0.9rem;
+      }
+
+      .rail-tab.active {
+        background: rgba(15, 118, 110, 0.14);
+        border-color: rgba(15, 118, 110, 0.34);
+        color: #0f5c56;
+      }
+
+      .rail-pane {
+        display: none;
+      }
+
+      .rail-pane.active {
+        display: grid;
+        gap: 14px;
       }
 
       .composer {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 12px;
-        border-top: 1px solid var(--border);
-        padding-top: 16px;
+        padding: 4px 4px 14px;
       }
 
       textarea {
@@ -251,6 +398,7 @@ HTML_PAGE = """<!doctype html>
       .source-snippet, .search-snippet {
         color: var(--ink);
         line-height: 1.5;
+        overflow-wrap: anywhere;
       }
 
       .source-meta, .search-meta {
@@ -264,6 +412,53 @@ HTML_PAGE = """<!doctype html>
       .tool-row {
         display: grid;
         gap: 10px;
+      }
+
+      .control-grid {
+        display: grid;
+        gap: 12px;
+        margin: 0 4px 16px;
+      }
+
+      .control-panel {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.54);
+        padding: 12px;
+      }
+
+      .control-panel > summary {
+        cursor: pointer;
+        font-size: 0.88rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent-3);
+        font-weight: 700;
+      }
+
+      .control-body {
+        display: grid;
+        gap: 14px;
+        margin-top: 12px;
+      }
+
+      .control-group {
+        display: grid;
+        gap: 10px;
+      }
+
+      .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .control-group-title {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
       }
 
       .inline-form {
@@ -280,14 +475,32 @@ HTML_PAGE = """<!doctype html>
         background: rgba(255, 255, 255, 0.82);
       }
 
-      .filter-panel {
-        margin: 0 4px 16px;
-        padding: 14px;
+      .control-body input,
+      .control-body select,
+      .control-body label {
+        width: 100%;
+        border-radius: 14px;
         border: 1px solid var(--border);
-        border-radius: 20px;
-        background:
-          linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(217, 119, 6, 0.06)),
-          rgba(255, 255, 255, 0.48);
+        padding: 12px 14px;
+        font: inherit;
+        background: rgba(255, 255, 255, 0.82);
+        color: inherit;
+      }
+
+      .control-body label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .control-body input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
+
+      .filter-panel {
+        display: grid;
+        gap: 10px;
       }
 
       .filter-header {
@@ -414,15 +627,20 @@ HTML_PAGE = """<!doctype html>
       }
 
       @media (max-width: 900px) {
+        .header-main,
+        .status-bar,
         .layout {
           grid-template-columns: 1fr;
         }
 
-        .messages {
+        .answer-tabs {
           max-height: none;
         }
 
+        .control-grid,
+        .settings-grid,
         .filter-grid,
+        .answer-meta-grid,
         .provider-row {
           grid-template-columns: 1fr;
         }
@@ -432,150 +650,146 @@ HTML_PAGE = """<!doctype html>
   <body>
     <main class="shell">
       <header class="header">
-        <div class="eyebrow">Local-first Memory</div>
-        <h1>Chat With Your Vault</h1>
-        <div class="subhead">
-          This interface uses the same retrieval pipeline as the CLI. Questions are answered with evidence-backed snippets and explicit source provenance from your local SQLite index.
+        <div class="header-main">
+          <div>
+            <div class="eyebrow">Local-first Memory</div>
+            <h1>Chat With Your Vault</h1>
+            <div class="subhead">
+              Questions are answered with evidence-backed snippets and explicit source provenance from your local SQLite index.
+            </div>
+          </div>
+          <form id="refresh-form">
+            <button class="secondary" id="refresh-button" type="submit">Refresh Index</button>
+          </form>
+        </div>
+        <div class="status-bar">
+          <div id="stats" class="status-items empty">Loading status...</div>
+          <div id="warnings" class="warning-box empty">No warnings.</div>
         </div>
       </header>
 
       <section class="layout">
-        <div class="panel chat-panel">
-          <div id="messages" class="messages">
-            <div class="message assistant">
-              <span class="role">Assistant</span>
-              <div class="body">Ask about your indexed notes. Results stay local and each answer includes sources.</div>
-            </div>
+        <aside class="panel left-rail">
+          <div class="rail-tabs" role="tablist" aria-label="Workspace navigation">
+            <button id="answers-tab" class="rail-tab active" type="button" data-rail-tab="answers">Answers</button>
+            <button id="search-tab" class="rail-tab" type="button" data-rail-tab="search">Search</button>
           </div>
-          <form id="llm-form" class="tool-row" style="padding: 0 4px 16px;">
-            <div class="inline-form">
-              <div class="provider-row">
-                <select id="llm-provider">
-                  <option value="ollama">Ollama</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="nvidia">NVIDIA</option>
-                  <option value="openai">OpenAI</option>
-                </select>
-                <input id="synthesis-model" type="text" placeholder="Model name">
-              </div>
-              <div id="provider-status" class="provider-status">Checking provider availability…</div>
-              <label>
-                <input id="use-llm" type="checkbox">
-                Use LLM synthesis for answers
-              </label>
-              <label>
-                <input id="rewrite-query" type="checkbox">
-                Rewrite natural-language query before retrieval
-              </label>
-              <label>
-                <input id="rerank-results" type="checkbox">
-                Rerank retrieved evidence
-              </label>
-            </div>
-          </form>
-          <section class="filter-panel" aria-label="Search filters">
-            <div class="filter-header">
-              <div class="filter-title">Filters</div>
-              <button id="clear-filters" class="ghost" type="button">Clear filters</button>
-            </div>
-            <div class="filter-grid">
-              <label class="field">
-                <span>Tags</span>
-                <input id="filter-tags" type="text" placeholder="project, planning">
-              </label>
-              <label class="field">
-                <span>Aliases</span>
-                <input id="filter-aliases" type="text" placeholder="North Star">
-              </label>
-              <label class="field">
-                <span>Path prefix</span>
-                <input id="filter-path-prefix" type="text" placeholder="/vault/projects">
-              </label>
-              <label class="field">
-                <span>Modified from</span>
-                <input id="filter-date-from" type="date">
-              </label>
-              <label class="field">
-                <span>Modified to</span>
-                <input id="filter-date-to" type="date">
-              </label>
-            </div>
-            <div id="active-filters" class="active-filters">No filters active.</div>
+          <section id="answers-pane" class="rail-pane active">
+            <nav id="answer-tabs" class="answer-tabs" aria-label="Answers"></nav>
           </section>
-          <form id="chat-form" class="composer">
-            <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
-            <button id="send-button" type="submit">✨ Ask</button>
-          </form>
-        </div>
-
-        <aside class="panel sidebar">
-          <section class="card">
-            <h2>📚 Index Status</h2>
-            <form id="refresh-form" class="inline-form" style="margin-bottom: 12px;">
-              <button class="secondary" id="refresh-button" type="submit">🔄 Refresh Index</button>
-            </form>
-            <div id="stats" class="stats empty">Loading status…</div>
-          </section>
-
-          <section class="card">
-            <h2>🛰 Provider</h2>
-            <div id="response-provider" class="sources empty">No response yet.</div>
-          </section>
-
-          <section class="card">
-            <h2>🧾 Latest Sources</h2>
-            <div id="sources" class="sources empty">No answer yet.</div>
-          </section>
-
-          <section class="card">
-            <h2>🧠 Retrieval Query</h2>
-            <div id="retrieval-query" class="sources empty">No query yet.</div>
-          </section>
-
-          <section class="card">
-            <h2>⚠️ Warnings</h2>
-            <div id="warnings" class="warning-box empty">No warnings.</div>
-          </section>
-
-          <section class="card">
-            <h2>🔎 Search</h2>
+          <section id="search-pane" class="rail-pane">
             <form id="search-form" class="inline-form">
               <input id="search-query" type="text" placeholder="Keyword or concept">
-              <button class="secondary" id="search-button" type="submit">🔎 Search</button>
+              <button class="secondary" id="search-button" type="submit">Search</button>
             </form>
             <div id="search-results" class="search-results empty">No search results yet.</div>
+            <section class="card">
+              <h2>Saved Searches</h2>
+              <form id="saved-search-form" class="inline-form">
+                <input id="saved-search-name" type="text" placeholder="Save current query as">
+                <button class="secondary" id="save-search-button" type="submit">Save Search</button>
+              </form>
+              <div id="saved-searches" class="sources empty">No saved searches yet.</div>
+            </section>
+            <section class="card">
+              <h2>Recent Queries</h2>
+              <div id="recent-queries" class="sources empty">No recent queries yet.</div>
+            </section>
           </section>
-
-          <section class="card">
-            <h2>🕘 Recent Queries</h2>
-            <div id="recent-queries" class="sources empty">No recent queries yet.</div>
-          </section>
-
-          <section class="card">
-            <h2>📌 Saved Searches</h2>
-            <form id="saved-search-form" class="inline-form">
-              <input id="saved-search-name" type="text" placeholder="Save current query as">
-              <button class="secondary" id="save-search-button" type="submit">Save Search</button>
-            </form>
-            <div id="saved-searches" class="sources empty">No saved searches yet.</div>
-          </section>
-
         </aside>
+
+        <div class="panel chat-panel">
+          <form id="chat-form" class="composer">
+            <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
+            <button id="send-button" type="submit">Ask</button>
+          </form>
+          <div class="control-grid">
+            <details class="control-panel">
+              <summary>Settings</summary>
+              <form id="llm-form" class="control-body">
+                <div class="settings-grid">
+                  <div class="control-group">
+                    <div class="control-group-title">Model & Retrieval</div>
+                    <div class="provider-row">
+                      <select id="llm-provider">
+                        <option value="ollama">Ollama</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="nvidia">NVIDIA</option>
+                        <option value="openai">OpenAI</option>
+                      </select>
+                      <input id="synthesis-model" type="text" placeholder="Model name">
+                    </div>
+                    <div id="provider-status" class="provider-status">Checking provider availability...</div>
+                    <label>
+                      <input id="use-llm" type="checkbox">
+                      Use LLM synthesis for answers
+                    </label>
+                    <label>
+                      <input id="rewrite-query" type="checkbox">
+                      Rewrite query before retrieval
+                    </label>
+                    <label>
+                      <input id="rerank-results" type="checkbox">
+                      Rerank retrieved evidence
+                    </label>
+                  </div>
+                  <div class="control-group">
+                    <div class="control-group-title">Filters</div>
+                    <section class="filter-panel" aria-label="Search filters">
+                      <div class="filter-header">
+                        <div id="active-filters" class="active-filters">No filters active.</div>
+                        <button id="clear-filters" class="ghost" type="button">Clear</button>
+                      </div>
+                      <div class="filter-grid">
+                        <label class="field">
+                          <span>Tags</span>
+                          <input id="filter-tags" type="text" placeholder="project, planning">
+                        </label>
+                        <label class="field">
+                          <span>Aliases</span>
+                          <input id="filter-aliases" type="text" placeholder="North Star">
+                        </label>
+                        <label class="field">
+                          <span>Path prefix</span>
+                          <input id="filter-path-prefix" type="text" placeholder="/vault/projects">
+                        </label>
+                        <label class="field">
+                          <span>Modified from</span>
+                          <input id="filter-date-from" type="date">
+                        </label>
+                        <label class="field">
+                          <span>Modified to</span>
+                          <input id="filter-date-to" type="date">
+                        </label>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </form>
+            </details>
+          </div>
+          <article id="answer-detail" class="answer-detail empty-state">
+            <div>Ask a question to create an answer workspace.</div>
+          </article>
+        </div>
       </section>
     </main>
 
     <script>
-      const messages = document.getElementById("messages");
       const chatForm = document.getElementById("chat-form");
       const queryInput = document.getElementById("query");
       const sendButton = document.getElementById("send-button");
       const stats = document.getElementById("stats");
       const refreshForm = document.getElementById("refresh-form");
       const refreshButton = document.getElementById("refresh-button");
-      const responseProvider = document.getElementById("response-provider");
-      const sources = document.getElementById("sources");
-      const retrievalQuery = document.getElementById("retrieval-query");
+      const answerTabs = document.getElementById("answer-tabs");
+      const answerDetail = document.getElementById("answer-detail");
       const warnings = document.getElementById("warnings");
+      const railTabButtons = Array.from(document.querySelectorAll("[data-rail-tab]"));
+      const railPanes = {
+        answers: document.getElementById("answers-pane"),
+        search: document.getElementById("search-pane"),
+      };
       const searchForm = document.getElementById("search-form");
       const searchQueryInput = document.getElementById("search-query");
       const searchButton = document.getElementById("search-button");
@@ -599,6 +813,8 @@ HTML_PAGE = """<!doctype html>
       const clearFiltersButton = document.getElementById("clear-filters");
       let providerDefaults = {};
       let providerAvailability = {};
+      let answerWorkspaces = [];
+      let activeWorkspaceId = null;
       const RECENT_QUERIES_KEY = "personal-memory-recent-queries";
       const SAVED_SEARCHES_KEY = "personal-memory-saved-searches";
 
@@ -607,15 +823,6 @@ HTML_PAGE = """<!doctype html>
         if (typeof errorPayload === "string") return errorPayload;
         if (typeof errorPayload.message === "string" && errorPayload.message) return errorPayload.message;
         return "Request failed.";
-      }
-
-      function appendMessage(role, text) {
-        const item = document.createElement("div");
-        item.className = `message ${role}`;
-        item.innerHTML = `<span class="role">${role === "user" ? "You" : "Assistant"}</span><div class="body"></div>`;
-        item.querySelector(".body").textContent = text;
-        messages.appendChild(item);
-        messages.scrollTop = messages.scrollHeight;
       }
 
       function parseCsv(value) {
@@ -684,6 +891,15 @@ HTML_PAGE = """<!doctype html>
         localStorage.setItem(key, JSON.stringify(value));
       }
 
+      function switchRailTab(name) {
+        for (const button of railTabButtons) {
+          button.classList.toggle("active", button.dataset.railTab === name);
+        }
+        for (const [paneName, pane] of Object.entries(railPanes)) {
+          pane.classList.toggle("active", paneName === name);
+        }
+      }
+
       function rememberQuery(query) {
         const entries = loadStoredList(RECENT_QUERIES_KEY).filter((item) => item !== query);
         entries.unshift(query);
@@ -716,6 +932,7 @@ HTML_PAGE = """<!doctype html>
           button.addEventListener("click", () => {
             queryInput.value = entry;
             searchQueryInput.value = entry;
+            switchRailTab("search");
           });
           actions.appendChild(button);
           card.appendChild(actions);
@@ -756,6 +973,7 @@ HTML_PAGE = """<!doctype html>
             queryInput.value = entry.query;
             searchQueryInput.value = entry.query;
             setFilters(entry.filters || {});
+            switchRailTab("search");
           });
           const deleteButton = document.createElement("button");
           deleteButton.type = "button";
@@ -770,23 +988,6 @@ HTML_PAGE = """<!doctype html>
           card.appendChild(actions);
           savedSearches.appendChild(card);
         }
-      }
-
-      function renderResponseProvider(provider, model) {
-        if (!provider && !model) {
-          responseProvider.className = "sources empty";
-          responseProvider.textContent = "No response yet.";
-          return;
-        }
-        responseProvider.className = "sources";
-        responseProvider.innerHTML = "";
-        const card = document.createElement("div");
-        card.className = "source";
-        const meta = document.createElement("div");
-        meta.className = "source-meta";
-        meta.textContent = `Provider: ${provider || "unknown"}\nModel: ${model || "default"}`;
-        card.appendChild(meta);
-        responseProvider.appendChild(card);
       }
 
       async function copyText(value, successMessage) {
@@ -807,19 +1008,18 @@ HTML_PAGE = """<!doctype html>
         const refreshLabel = refreshState.in_progress
           ? "running"
           : refreshState.last_result?.status || "idle";
+        const latestRun = payload.latest_run ? `${payload.latest_run.run_type}: ${payload.latest_run.status}` : "no run";
         const entries = [
-          ["Documents", payload.documents],
-          ["Chunks", payload.chunks],
-          ["Embeddings", payload.embeddings],
-          ["Vault", payload.vault_path || "not configured"],
-          ["Latest Run", payload.latest_run ? `${payload.latest_run.run_type} (${payload.latest_run.status})` : "none"],
-          ["Refresh State", refreshLabel],
-          ["Refresh Ready", payload.refresh_available ? "yes" : "no"],
+          `${payload.documents} docs`,
+          `${payload.chunks} chunks`,
+          `${payload.embeddings} embeddings`,
+          latestRun,
+          `refresh: ${refreshLabel}`,
         ];
-        for (const [label, value] of entries) {
-          const row = document.createElement("div");
-          row.className = "stat";
-          row.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+        for (const value of entries) {
+          const row = document.createElement("span");
+          row.className = "status-pill";
+          row.textContent = value;
           stats.appendChild(row);
         }
         refreshButton.disabled = !payload.refresh_available || Boolean(refreshState.in_progress);
@@ -886,53 +1086,201 @@ HTML_PAGE = """<!doctype html>
         providerStatus.textContent = `${providerLabel} is available.`;
       }
 
-      function renderSources(items) {
-        if (!items.length) {
-          sources.className = "sources empty";
-          sources.textContent = "No sources for this answer.";
+      function createSourceCard(item, className = "source") {
+        const card = document.createElement("div");
+        card.className = className;
+        const section = item.section_title ? ` · ${item.section_title}` : "";
+        const title = document.createElement("div");
+        title.className = className === "search-result" ? "search-title" : "source-title";
+        title.textContent = `${item.document_title}${section}`;
+        const path = document.createElement("div");
+        path.className = className === "search-result" ? "search-path" : "source-path";
+        path.textContent = item.source_path;
+        const snippet = document.createElement("div");
+        snippet.className = className === "search-result" ? "search-snippet" : "source-snippet";
+        snippet.textContent = item.snippet || "";
+        const meta = document.createElement("div");
+        meta.className = className === "search-result" ? "search-meta" : "source-meta";
+        const score = typeof item.final_score === "number" ? `Final score: ${item.final_score.toFixed(3)}` : "";
+        const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
+        const rerank = typeof item.rerank_score === "number" && item.rerank_score > 0 ? ` · rerank: ${item.rerank_score.toFixed(3)}` : "";
+        const ref = item.source_ref || item.source_path;
+        meta.textContent = className === "search-result" ? `${score}${metadata}${rerank}` : `${ref}\n${score}${metadata}${rerank}`;
+        const actions = document.createElement("div");
+        actions.className = "action-row";
+        const pathButton = document.createElement("button");
+        pathButton.type = "button";
+        pathButton.className = "ghost";
+        pathButton.textContent = "Copy Path";
+        pathButton.addEventListener("click", () => copyText(item.source_path, "Source path copied."));
+        const refButton = document.createElement("button");
+        refButton.type = "button";
+        refButton.className = "ghost";
+        refButton.textContent = className === "search-result" ? "Copy Section Ref" : "Copy Source Ref";
+        const sourceRef = className === "search-result" && item.section_title
+          ? `${item.source_path}#${item.section_title.toLowerCase().replaceAll(" ", "-")}`
+          : ref;
+        refButton.addEventListener("click", () => copyText(sourceRef, "Source reference copied."));
+        const openLink = document.createElement("a");
+        openLink.className = "ghost";
+        openLink.textContent = "Open Hook";
+        openLink.href = `obsidian://open?path=${encodeURIComponent(item.source_path)}`;
+        actions.append(pathButton, refButton, openLink);
+        card.append(title, path, snippet, meta, actions);
+        return card;
+      }
+
+      function createWorkspace(question, filters) {
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const workspace = {
+          id,
+          question,
+          answer: "Retrieving evidence...",
+          status: "loading",
+          answer_mode: "",
+          sources: [],
+          retrieval_query: "",
+          filters,
+          provider: providerSelect.value,
+          model: synthesisModelInput.value.trim(),
+          warnings: [],
+          rerank: rerankResultsInput.checked,
+          created_at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+        answerWorkspaces.unshift(workspace);
+        activeWorkspaceId = id;
+        renderAnswerWorkspaces();
+        return workspace;
+      }
+
+      function activeWorkspace() {
+        return answerWorkspaces.find((item) => item.id === activeWorkspaceId) || null;
+      }
+
+      function workspaceStatusLabel(workspace) {
+        if (workspace.status === "loading") return "Retrieving";
+        if (workspace.status === "error") return "Error";
+        return workspace.answer_mode === "llm_synthesis" ? "LLM answer" : "Extractive";
+      }
+
+      function renderAnswerWorkspaces() {
+        renderAnswerTabs();
+        renderAnswerDetail();
+      }
+
+      function renderAnswerTabs() {
+        if (!answerWorkspaces.length) {
+          answerTabs.innerHTML = "";
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "No answers yet.";
+          answerTabs.appendChild(empty);
           return;
         }
-        sources.className = "sources";
-        sources.innerHTML = "";
-        for (const item of items) {
-          const card = document.createElement("div");
-          card.className = "source";
-          const section = item.section_title ? ` · ${item.section_title}` : "";
-          const title = document.createElement("div");
-          title.className = "source-title";
-          title.textContent = `${item.document_title}${section}`;
-          const path = document.createElement("div");
-          path.className = "source-path";
-          path.textContent = item.source_path;
-          const snippet = document.createElement("div");
-          snippet.className = "source-snippet";
-          snippet.textContent = item.snippet;
-          const meta = document.createElement("div");
-          meta.className = "source-meta";
-          const score = typeof item.final_score === "number" ? `\nFinal score: ${item.final_score.toFixed(3)}` : "";
-          const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
-          const rerank = typeof item.rerank_score === "number" && item.rerank_score > 0 ? ` · rerank: ${item.rerank_score.toFixed(3)}` : "";
-          meta.textContent = `${item.source_ref || item.source_path}${score}${metadata}${rerank}`;
-          const actions = document.createElement("div");
-          actions.className = "action-row";
+        answerTabs.innerHTML = "";
+        for (const workspace of answerWorkspaces) {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "ghost";
-          button.textContent = "Copy Source Ref";
-          button.addEventListener("click", () => copyText(item.source_ref || item.source_path, "Source reference copied."));
-          const pathButton = document.createElement("button");
-          pathButton.type = "button";
-          pathButton.className = "ghost";
-          pathButton.textContent = "Copy Path";
-          pathButton.addEventListener("click", () => copyText(item.source_path, "Source path copied."));
-          const openLink = document.createElement("a");
-          openLink.className = "ghost";
-          openLink.textContent = "Open Hook";
-          openLink.href = `obsidian://open?path=${encodeURIComponent(item.source_path)}`;
-          actions.append(button, pathButton, openLink);
-          card.append(title, path, snippet, meta, actions);
-          sources.appendChild(card);
+          button.className = `answer-tab${workspace.id === activeWorkspaceId ? " active" : ""}`;
+          const title = document.createElement("div");
+          title.className = "answer-tab-title";
+          title.textContent = workspace.question;
+          const meta = document.createElement("div");
+          meta.className = "answer-tab-meta";
+          meta.textContent = `${workspaceStatusLabel(workspace)} · ${workspace.sources.length} sources · ${workspace.created_at}`;
+          button.append(title, meta);
+          button.addEventListener("click", () => {
+            activeWorkspaceId = workspace.id;
+            renderAnswerWorkspaces();
+          });
+          answerTabs.appendChild(button);
         }
+      }
+
+      function appendMetaItem(container, label, value) {
+        const item = document.createElement("div");
+        item.className = "answer-meta-item";
+        item.textContent = `${label}: ${value || "none"}`;
+        container.appendChild(item);
+      }
+
+      function renderDetailSection(parent, title, items, renderer, open = false) {
+        const details = document.createElement("details");
+        details.className = "answer-section";
+        details.open = open;
+        const summary = document.createElement("summary");
+        summary.textContent = title;
+        const body = document.createElement("div");
+        body.className = "answer-section-body";
+        if (!items || !items.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "None.";
+          body.appendChild(empty);
+        } else {
+          for (const item of items) {
+            body.appendChild(renderer(item));
+          }
+        }
+        details.append(summary, body);
+        parent.appendChild(details);
+      }
+
+      function renderAnswerDetail() {
+        const workspace = activeWorkspace();
+        answerDetail.className = "answer-detail";
+        answerDetail.innerHTML = "";
+        if (!workspace) {
+          answerDetail.className = "answer-detail empty-state";
+          answerDetail.textContent = "Ask a question to create an answer workspace.";
+          return;
+        }
+
+        const card = document.createElement("section");
+        card.className = "answer-card";
+        const question = document.createElement("div");
+        question.className = "answer-question";
+        question.textContent = workspace.question;
+        const answer = document.createElement("div");
+        answer.className = "answer-text";
+        answer.textContent = workspace.answer;
+        card.append(question, answer);
+        answerDetail.appendChild(card);
+
+        const metaGrid = document.createElement("div");
+        metaGrid.className = "answer-meta-grid";
+        appendMetaItem(metaGrid, "Mode", workspaceStatusLabel(workspace));
+        appendMetaItem(metaGrid, "Provider", workspace.provider || "unknown");
+        appendMetaItem(metaGrid, "Model", workspace.model || "default");
+        appendMetaItem(metaGrid, "Rerank", workspace.rerank ? "on" : "off");
+        answerDetail.appendChild(metaGrid);
+
+        renderDetailSection(answerDetail, `Sources (${workspace.sources.length})`, workspace.sources, (item) => createSourceCard(item), true);
+        renderDetailSection(
+          answerDetail,
+          "Retrieval Details",
+          [
+            `Retrieval query: ${workspace.retrieval_query || workspace.question}`,
+            `Filters: ${filterLabels(workspace.filters || {}).join(" · ") || "none"}`,
+          ],
+          (item) => {
+            const row = document.createElement("div");
+            row.className = "source-meta";
+            row.textContent = item;
+            return row;
+          },
+        );
+        renderDetailSection(
+          answerDetail,
+          `Warnings (${workspace.warnings.length})`,
+          workspace.warnings,
+          (item) => {
+            const row = document.createElement("div");
+            row.className = "warning-item";
+            row.textContent = item;
+            return row;
+          },
+        );
       }
 
       function renderSearchResults(items) {
@@ -944,43 +1292,7 @@ HTML_PAGE = """<!doctype html>
         searchResults.className = "search-results";
         searchResults.innerHTML = "";
         for (const item of items) {
-          const card = document.createElement("div");
-          card.className = "search-result";
-          const section = item.section_title ? ` · ${item.section_title}` : "";
-          const title = document.createElement("div");
-          title.className = "search-title";
-          title.textContent = `${item.document_title}${section}`;
-          const path = document.createElement("div");
-          path.className = "search-path";
-          path.textContent = item.source_path;
-          const snippet = document.createElement("div");
-          snippet.className = "search-snippet";
-          snippet.textContent = item.snippet;
-          const meta = document.createElement("div");
-          meta.className = "search-meta";
-          const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
-          const rerank = typeof item.rerank_score === "number" && item.rerank_score > 0 ? ` · rerank: ${item.rerank_score.toFixed(3)}` : "";
-          meta.textContent = `Final score: ${item.final_score.toFixed(3)}${metadata}${rerank}`;
-          const actions = document.createElement("div");
-          actions.className = "action-row";
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "ghost";
-          button.textContent = "Copy Path";
-          button.addEventListener("click", () => copyText(item.source_path, "Source path copied."));
-          const refButton = document.createElement("button");
-          refButton.type = "button";
-          refButton.className = "ghost";
-          refButton.textContent = "Copy Section Ref";
-          const sourceRef = item.section_title ? `${item.source_path}#${item.section_title.toLowerCase().replaceAll(" ", "-")}` : item.source_path;
-          refButton.addEventListener("click", () => copyText(sourceRef, "Section reference copied."));
-          const openLink = document.createElement("a");
-          openLink.className = "ghost";
-          openLink.textContent = "Open Hook";
-          openLink.href = `obsidian://open?path=${encodeURIComponent(item.source_path)}`;
-          actions.append(button, refButton, openLink);
-          card.append(title, path, snippet, meta, actions);
-          searchResults.appendChild(card);
+          searchResults.appendChild(createSourceCard(item, "search-result"));
         }
       }
 
@@ -998,23 +1310,6 @@ HTML_PAGE = """<!doctype html>
           row.textContent = item;
           warnings.appendChild(row);
         }
-      }
-
-      function renderRetrievalQuery(value) {
-        if (!value) {
-          retrievalQuery.className = "sources empty";
-          retrievalQuery.textContent = "No query yet.";
-          return;
-        }
-        retrievalQuery.className = "sources";
-        retrievalQuery.innerHTML = "";
-        const card = document.createElement("div");
-        card.className = "source";
-        const meta = document.createElement("div");
-        meta.className = "source-meta";
-        meta.textContent = value;
-        card.appendChild(meta);
-        retrievalQuery.appendChild(card);
       }
 
       async function loadStatus() {
@@ -1063,7 +1358,7 @@ HTML_PAGE = """<!doctype html>
         const query = queryInput.value.trim();
         if (!query) return;
         const filters = readFilters();
-        appendMessage("user", query);
+        const workspace = createWorkspace(query, filters);
         queryInput.value = "";
         sendButton.disabled = true;
 
@@ -1084,24 +1379,32 @@ HTML_PAGE = """<!doctype html>
           const payload = await response.json();
           if (!response.ok) {
             const errorMessage = formatErrorMessage(payload.error);
-            appendMessage("assistant", errorMessage);
-            renderSources([]);
-            renderRetrievalQuery(payload.retrieval_query || "");
+            workspace.status = "error";
+            workspace.answer = errorMessage;
+            workspace.sources = [];
+            workspace.retrieval_query = payload.retrieval_query || "";
+            workspace.warnings = [errorMessage];
             renderWarnings([errorMessage]);
-            renderResponseProvider("", "");
+            renderAnswerWorkspaces();
             return;
           }
           rememberQuery(query);
-          appendMessage("assistant", payload.answer);
-          renderSources(payload.sources || []);
-          renderRetrievalQuery(payload.retrieval_query || query);
-          renderWarnings(payload.warnings || []);
-          renderResponseProvider(payload.provider, payload.model);
+          workspace.status = "ready";
+          workspace.answer = payload.answer;
+          workspace.answer_mode = payload.answer_mode || "";
+          workspace.sources = payload.sources || [];
+          workspace.retrieval_query = payload.retrieval_query || query;
+          workspace.provider = payload.provider || workspace.provider;
+          workspace.model = payload.model || workspace.model;
+          workspace.warnings = payload.warnings || [];
+          workspace.rerank = Boolean(payload.rerank);
+          renderAnswerWorkspaces();
         } catch (error) {
-          appendMessage("assistant", `Request failed: ${error}`);
-          renderRetrievalQuery("");
+          workspace.status = "error";
+          workspace.answer = `Request failed: ${error}`;
+          workspace.warnings = [`Request failed: ${error}`];
           renderWarnings([`Request failed: ${error}`]);
-          renderResponseProvider("", "");
+          renderAnswerWorkspaces();
         } finally {
           sendButton.disabled = false;
         }
@@ -1147,13 +1450,15 @@ HTML_PAGE = """<!doctype html>
       for (const input of [filterTagsInput, filterAliasesInput, filterPathPrefixInput, filterDateFromInput, filterDateToInput]) {
         input.addEventListener("input", renderActiveFilters);
       }
+      for (const button of railTabButtons) {
+        button.addEventListener("click", () => switchRailTab(button.dataset.railTab));
+      }
 
       loadStatus();
       renderRecentQueries();
       renderSavedSearches();
       providerSelect.addEventListener("change", syncProviderState);
-      renderRetrievalQuery("");
-      renderResponseProvider("", "");
+      renderAnswerWorkspaces();
       renderActiveFilters();
     </script>
   </body>
