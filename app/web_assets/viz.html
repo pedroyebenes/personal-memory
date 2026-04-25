@@ -10,10 +10,11 @@
     body { background: #12121f; color: #d8d8e8; font-family: Georgia, serif; overflow: hidden; }
 
     #canvas-container { position: fixed; inset: 0; }
-    #canvas-container > div { pointer-events: none; } /* CSS2D overlay */
+    #label-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
 
     /* ── Floating labels ── */
     .point-label {
+      position: absolute;
       font-family: Georgia, serif;
       font-size: 11px;
       line-height: 1.3;
@@ -29,7 +30,24 @@
       pointer-events: none;
       user-select: none;
       backdrop-filter: blur(3px);
+      transform: translate(10px, -50%);
+      will-change: left, top, opacity;
+      opacity: 0;
+      transition: opacity 120ms ease;
     }
+    .point-label::before {
+      content: "";
+      position: absolute;
+      left: -7px;
+      top: 50%;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+      transform: translateY(-50%);
+      box-shadow: 0 0 8px currentColor;
+    }
+    .point-label.visible { opacity: 1; }
 
     /* ── Sidebar ── */
     #sidebar {
@@ -58,6 +76,21 @@
       border-bottom: 1px solid rgba(255,255,255,0.07);
       flex-shrink: 0;
     }
+    .search-box { margin-bottom: 12px; }
+    .search-box input {
+      width: 100%;
+      height: 30px;
+      background: rgba(255,255,255,0.045);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 5px;
+      color: #e8e8f4;
+      font: 0.78rem Georgia, serif;
+      padding: 0 8px;
+      outline: none;
+    }
+    .search-box input:focus { border-color: rgba(158, 207, 184, 0.45); }
+    .search-box input::placeholder { color: #555; }
+    .search-meta { min-height: 16px; margin-top: 5px; font-size: 0.68rem; color: #68687a; }
     .ctrl { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: #aaa; margin-bottom: 10px; user-select: none; }
     .ctrl:last-child { margin-bottom: 0; }
     .ctrl input[type=checkbox] { cursor: pointer; accent-color: #9ecfb8; }
@@ -69,7 +102,20 @@
     #sidebar-legend { flex: 1; overflow-y: auto; padding: 14px 18px; }
     .legend-heading { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em; color: #555; margin-bottom: 8px; }
     #legend-list { display: flex; flex-direction: column; gap: 4px; }
-    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.73rem; color: #bbb; padding: 3px 6px; border-radius: 4px; }
+    .legend-item {
+      width: 100%;
+      display: flex; align-items: center; gap: 8px;
+      font: 0.73rem Georgia, serif; color: #bbb;
+      padding: 4px 6px; border: 0; border-radius: 4px;
+      background: transparent; text-align: left; cursor: pointer;
+    }
+    .legend-item:hover { background: rgba(255,255,255,0.055); color: #eee; }
+    .legend-item.active {
+      background: rgba(158,207,184,0.14);
+      color: #fff;
+      box-shadow: inset 0 0 0 1px rgba(158,207,184,0.18);
+    }
+    .legend-item.dimmed { opacity: 0.42; }
     .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
     /* ── Tooltip ── */
@@ -115,6 +161,7 @@
 </div>
 
 <div id="canvas-container"></div>
+<div id="label-layer"></div>
 
 <div id="sidebar">
   <div id="sidebar-header">
@@ -126,6 +173,10 @@
   </div>
 
   <div id="sidebar-controls">
+    <div class="search-box">
+      <input id="viz-search" type="search" placeholder="Search chunks, sections, docs">
+      <div class="search-meta" id="search-meta">Search highlights matching points.</div>
+    </div>
     <div class="ctrl">
       <label><input type="checkbox" id="auto-rotate" checked> Auto-rotate</label>
     </div>
@@ -140,7 +191,7 @@
       <span style="white-space:nowrap">Point size</span>
       <input type="range" id="point-size" min="1" max="16" value="5">
     </div>
-    <p class="note">Orbit to explore — labels follow your focus point.</p>
+    <p class="note">Orbit to explore — labels track visible focus points.</p>
   </div>
 
   <div id="sidebar-legend">
@@ -167,7 +218,6 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls }              from 'three/addons/controls/OrbitControls.js';
-import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // 20-color palette for clusters
 const PALETTE = [
@@ -186,14 +236,18 @@ function conceptName(p) {
 }
 
 // ── Globals ────────────────────────────────────────────────────
-let scene, camera, renderer, labelRenderer, controls;
+let scene, camera, renderer, controls;
 let pointsMesh, edgeLines;
 let vizData = null;
-let labelObjects = [];      // { obj: CSS2DObject, vec: THREE.Vector3 }
+let labelObjects = [];      // { el: HTMLElement, vec: THREE.Vector3 }
 let visibleSet = new Set();
 let maxLabels = 20;
 let frameIdx = 0;
+let activeClusterId = null;
+let searchMatches = new Set();
 const _tmp = new THREE.Vector3();
+const SIDEBAR_WIDTH = 248;
+const LABEL_MARGIN = 12;
 
 // ── Main ───────────────────────────────────────────────────────
 async function main() {
@@ -206,7 +260,7 @@ async function main() {
   vizData = data;
 
   document.getElementById('meta-chunks').innerHTML =
-    `<strong>${data.points.length.toLocaleString()}</strong> concepts`;
+    `<strong>${data.points.length.toLocaleString()}</strong> chunks`;
   document.getElementById('meta-clusters').innerHTML =
     `<strong>${data.n_clusters}</strong> clusters`;
   if (data.variance_explained?.length) {
@@ -247,15 +301,8 @@ function setupScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(w, h);
 
-  labelRenderer = new CSS2DRenderer();
-  labelRenderer.setSize(w, h);
-  Object.assign(labelRenderer.domElement.style, {
-    position: 'absolute', top: '0', left: '0', pointerEvents: 'none',
-  });
-
   const container = document.getElementById('canvas-container');
   container.appendChild(renderer.domElement);
-  container.appendChild(labelRenderer.domElement);
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -280,7 +327,7 @@ function setupScene() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-    labelRenderer.setSize(w, h);
+    refreshLabels(true);
   });
 }
 
@@ -288,12 +335,9 @@ function setupScene() {
 function buildPoints(points) {
   const positions = new Float32Array(points.length * 3);
   const colors    = new Float32Array(points.length * 3);
-  const col = new THREE.Color();
 
   points.forEach((p, i) => {
     positions[i*3]   = p.x; positions[i*3+1] = p.y; positions[i*3+2] = p.z;
-    col.set(clusterColor(p.cluster_id));
-    colors[i*3] = col.r; colors[i*3+1] = col.g; colors[i*3+2] = col.b;
   });
 
   const geo = new THREE.BufferGeometry();
@@ -305,6 +349,7 @@ function buildPoints(points) {
     sizeAttenuation: true, transparent: true, opacity: 0.9,
   }));
   scene.add(pointsMesh);
+  applyPointStyling();
 }
 
 // ── Edges (gradient between cluster colors) ────────────────────
@@ -336,35 +381,123 @@ function buildEdges(points, edges) {
 
 // ── Labels ─────────────────────────────────────────────────────
 function buildLabels(points) {
+  const labelLayer = document.getElementById('label-layer');
   labelObjects = points.map(p => {
     const div = document.createElement('div');
     div.className = 'point-label';
     div.textContent = conceptName(p);
-
-    const obj = new CSS2DObject(div);
-    obj.position.set(p.x, p.y, p.z);
-    return { obj, vec: new THREE.Vector3(p.x, p.y, p.z) };
+    labelLayer.appendChild(div);
+    return { el: div, vec: new THREE.Vector3(p.x, p.y, p.z) };
   });
 }
 
+function pointPassesCluster(i) {
+  return activeClusterId === null || vizData.points[i].cluster_id === activeClusterId;
+}
+
+function searchableText(p) {
+  return [conceptName(p), p.document_title, p.section_title, p.snippet].filter(Boolean).join(' ').toLowerCase();
+}
+
+function applyPointStyling() {
+  if (!pointsMesh || !vizData?.points) return;
+  const colors = pointsMesh.geometry.getAttribute('color');
+  const col = new THREE.Color();
+  const dim = new THREE.Color(0x25263a);
+  const highlight = new THREE.Color(0xffe36e);
+
+  vizData.points.forEach((p, i) => {
+    if (searchMatches.has(i)) {
+      col.copy(highlight);
+    } else {
+      col.set(clusterColor(p.cluster_id));
+      if (activeClusterId !== null && p.cluster_id !== activeClusterId) col.lerp(dim, 0.78);
+    }
+    colors.setXYZ(i, col.r, col.g, col.b);
+  });
+  colors.needsUpdate = true;
+}
+
+function focusPoint(index) {
+  const p = vizData.points[index];
+  if (!p) return;
+  const target = new THREE.Vector3(p.x, p.y, p.z);
+  const direction = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(target);
+  camera.position.copy(target).add(direction.multiplyScalar(1.25));
+  controls.autoRotate = false;
+  document.getElementById('auto-rotate').checked = false;
+  controls.update();
+  refreshLabels(true);
+}
+
+function focusCluster(clusterId) {
+  const points = vizData.points.filter(p => p.cluster_id === clusterId);
+  if (!points.length) return;
+  const center = points.reduce(
+    (acc, p) => acc.add(new THREE.Vector3(p.x, p.y, p.z)),
+    new THREE.Vector3()
+  ).multiplyScalar(1 / points.length);
+  const radius = Math.max(
+    0.7,
+    ...points.map(p => center.distanceTo(new THREE.Vector3(p.x, p.y, p.z)))
+  );
+  const direction = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(center);
+  camera.position.copy(center).add(direction.multiplyScalar(Math.min(4.2, radius * 2.6 + 0.9)));
+  controls.autoRotate = false;
+  document.getElementById('auto-rotate').checked = false;
+  controls.update();
+  refreshLabels(true);
+}
+
 function refreshLabels(force = false) {
-  if (!force && frameIdx % 8 !== 0) return;
+  if (!force && frameIdx % 3 !== 0) return;
 
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const minX = SIDEBAR_WIDTH + LABEL_MARGIN;
   const target = controls.target;
-  const nearest = labelObjects
-    .map((l, i) => ({ i, d: _tmp.copy(l.vec).distanceTo(target) }))
-    .sort((a, b) => a.d - b.d)
-    .slice(0, maxLabels);
+  const candidates = [];
 
-  const next = new Set(nearest.map(x => x.i));
+  labelObjects.forEach((label, i) => {
+    if (!pointPassesCluster(i)) return;
+    _tmp.copy(label.vec).project(camera);
+    if (_tmp.z < -1 || _tmp.z > 1) return;
+    const x = (_tmp.x * 0.5 + 0.5) * w;
+    const y = (-_tmp.y * 0.5 + 0.5) * h;
+    if (x < minX || x > w - LABEL_MARGIN || y < LABEL_MARGIN || y > h - LABEL_MARGIN) return;
+    candidates.push({
+      i,
+      x,
+      y,
+      d: label.vec.distanceTo(target),
+      z: _tmp.z,
+      priority: searchMatches.has(i) ? 0 : 1,
+    });
+  });
+
+  candidates.sort((a, b) => (a.priority - b.priority) || (a.d - b.d) || (a.z - b.z));
+  const accepted = [];
+  const next = new Set();
+
+  for (const item of candidates) {
+    if (accepted.length >= maxLabels) break;
+    const tooClose = accepted.some(other => Math.abs(other.x - item.x) < 120 && Math.abs(other.y - item.y) < 24);
+    if (tooClose) continue;
+    accepted.push(item);
+    next.add(item.i);
+  }
 
   for (const idx of visibleSet) {
-    if (!next.has(idx)) scene.remove(labelObjects[idx].obj);
+    if (!next.has(idx)) labelObjects[idx].el.classList.remove('visible');
   }
-  for (const idx of next) {
-    if (!visibleSet.has(idx)) scene.add(labelObjects[idx].obj);
+  for (const item of accepted) {
+    const el = labelObjects[item.i].el;
+    el.style.left = `${Math.round(item.x)}px`;
+    el.style.top = `${Math.round(item.y)}px`;
+    el.classList.add('visible');
   }
-
   visibleSet = next;
 }
 
@@ -372,14 +505,31 @@ function refreshLabels(force = false) {
 function buildLegend(n) {
   const list = document.getElementById('legend-list');
   for (let i = 0; i < n; i++) {
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'legend-item';
+    item.dataset.clusterId = String(i);
     item.innerHTML = `
       <div class="legend-swatch" style="background:${clusterColor(i)}"></div>
       <span>Cluster ${i + 1}</span>
     `;
+    item.addEventListener('click', () => {
+      activeClusterId = activeClusterId === i ? null : i;
+      updateLegendState();
+      applyPointStyling();
+      if (activeClusterId !== null) focusCluster(activeClusterId);
+      refreshLabels(true);
+    });
     list.appendChild(item);
   }
+}
+
+function updateLegendState() {
+  document.querySelectorAll('.legend-item').forEach(item => {
+    const clusterId = Number(item.dataset.clusterId);
+    item.classList.toggle('active', activeClusterId === clusterId);
+    item.classList.toggle('dimmed', activeClusterId !== null && activeClusterId !== clusterId);
+  });
 }
 
 // ── Hover tooltip ──────────────────────────────────────────────
@@ -398,8 +548,9 @@ function setupHover(points) {
     pending = setTimeout(() => {
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObject(pointsMesh);
-      if (hits.length > 0) {
-        const p = points[hits[0].index];
+      const hit = hits.find(item => pointPassesCluster(item.index));
+      if (hit) {
+        const p = points[hit.index];
         document.getElementById('tt-concept').textContent = conceptName(p);
         document.getElementById('tt-doc').textContent = p.document_title;
         document.getElementById('tt-text').textContent = p.snippet;
@@ -417,6 +568,35 @@ function setupHover(points) {
 
 // ── UI controls ────────────────────────────────────────────────
 function setupUIControls() {
+  const searchInput = document.getElementById('viz-search');
+  const searchMeta = document.getElementById('search-meta');
+
+  searchInput.addEventListener('input', e => {
+    const query = e.target.value.trim().toLowerCase();
+    searchMatches = new Set();
+    if (query.length >= 2) {
+      vizData.points.forEach((p, i) => {
+        if (searchableText(p).includes(query)) searchMatches.add(i);
+      });
+    }
+    searchMeta.textContent = query.length < 2
+      ? 'Search highlights matching points.'
+      : `${searchMatches.size.toLocaleString()} matching chunk${searchMatches.size === 1 ? '' : 's'}`;
+    applyPointStyling();
+    if (searchMatches.size) focusPoint([...searchMatches][0]);
+    refreshLabels(true);
+  });
+
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.currentTarget.value = '';
+      searchMatches = new Set();
+      searchMeta.textContent = 'Search highlights matching points.';
+      applyPointStyling();
+      refreshLabels(true);
+    }
+  });
+
   document.getElementById('auto-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
   });
@@ -438,7 +618,6 @@ function animate() {
   controls.update();
   refreshLabels();
   renderer.render(scene, camera);
-  labelRenderer.render(scene, camera);
   frameIdx++;
 }
 
