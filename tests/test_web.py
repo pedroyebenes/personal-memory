@@ -127,6 +127,23 @@ def test_refresh_rejects_concurrent_requests(settings: Settings) -> None:
     assert payload["error"]["code"] == "refresh_in_progress"
 
 
+def test_refresh_rebuilds_concepts_for_skipped_documents(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    connection.execute("DELETE FROM entity_mentions")
+    connection.execute("DELETE FROM entities")
+    connection.commit()
+    settings.vault_path = fixture_vault
+    refresh_state = RefreshState()
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post("/api/refresh", {}, settings, refresh_state, with_connection)
+
+    assert int(status) == 200
+    assert payload["skipped"] == 3
+    assert payload["concepts"]["entities"] > 0
+    assert payload["concepts"]["mentions"] > 0
+
+
 def test_refresh_returns_structured_failure_and_tracks_last_result(settings: Settings, monkeypatch) -> None:
     settings.vault_path = settings.database_path.parent
     refresh_state = RefreshState()
@@ -202,6 +219,23 @@ def test_search_accepts_rerank_flag(connection, fixture_vault: Path, settings: S
     assert payload["rerank"] is True
     assert payload["results"]
     assert any(item["rerank_score"] > 0 for item in payload["results"])
+
+
+def test_search_accepts_concept_boost_flag(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/search?query=North%20Star&concept_boost=true",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["concept_boost"] is True
+    assert payload["results"]
+    assert any("concept_boost" in item["score_explanation"] for item in payload["results"])
 
 
 def test_search_filters_by_modified_date_range(connection, fixture_vault: Path, settings: Settings) -> None:
@@ -289,6 +323,49 @@ def test_chat_accepts_rerank_flag(connection, fixture_vault: Path, settings: Set
     assert payload["rerank"] is True
     assert payload["sources"]
     assert any(source["rerank_score"] > 0 for source in payload["sources"])
+
+
+def test_concepts_api_lists_details_and_refreshes(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/concepts?search=north&limit=10",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["concepts"]
+    project = next(item for item in payload["concepts"] if item["normalized_key"] == "project north star")
+
+    status, detail = handle_api_get(
+        f"/api/concepts/{project['id']}",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert detail["mentions"]
+    assert detail["documents"]
+
+    connection.execute("DELETE FROM entity_mentions")
+    connection.execute("DELETE FROM entities")
+    connection.commit()
+
+    status, refreshed = handle_api_post(
+        "/api/concepts/refresh",
+        {},
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert refreshed["entities"] > 0
+    assert refreshed["mentions"] > 0
 
 
 def test_chat_treats_null_path_prefix_as_no_filter(connection, fixture_vault: Path, settings: Settings) -> None:

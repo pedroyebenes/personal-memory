@@ -74,9 +74,12 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_name TEXT NOT NULL,
+    normalized_key TEXT NOT NULL UNIQUE,
     entity_type TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL
+    mention_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS entity_mentions (
@@ -84,10 +87,15 @@ CREATE TABLE IF NOT EXISTS entity_mentions (
     entity_id INTEGER NOT NULL,
     chunk_id INTEGER NOT NULL,
     mention_text TEXT NOT NULL,
+    extraction_method TEXT NOT NULL DEFAULT 'unknown',
     created_at TEXT NOT NULL,
+    UNIQUE(entity_id, chunk_id, extraction_method, mention_text),
     FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE,
     FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON entity_mentions(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_chunk ON entity_mentions(chunk_id);
 
 CREATE TABLE IF NOT EXISTS document_summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

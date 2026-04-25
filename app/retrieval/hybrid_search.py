@@ -6,10 +6,13 @@ import sqlite3
 
 from app.config import Settings
 from app.models import RetrievalResult, SearchFilters
+from app.retrieval.concept_search import chunks_with_concepts, find_concepts_for_terms
 from app.retrieval.keyword_search import keyword_search
 from app.retrieval.rerank import rerank_results
 from app.retrieval.snippets import extract_snippet, query_terms
 from app.retrieval.semantic_search import semantic_search
+
+CONCEPT_BOOST_WEIGHT = 0.06
 
 
 def _normalize_filters(filters: SearchFilters | None) -> SearchFilters:
@@ -134,6 +137,39 @@ def _metadata_score(
     return metadata_score, explanation
 
 
+def _apply_concept_boost(
+    connection: sqlite3.Connection,
+    results: list[RetrievalResult],
+    terms: list[str],
+) -> None:
+    if not results or not terms:
+        return
+    matched_concepts = find_concepts_for_terms(connection, terms)
+    if not matched_concepts:
+        return
+    entity_ids = {int(item["id"]) for item in matched_concepts}
+    chunk_ids = {result.chunk_id for result in results}
+    matches = chunks_with_concepts(connection, chunk_ids, entity_ids)
+    if not matches:
+        return
+    by_id = {int(item["id"]): item for item in matched_concepts}
+    for result in results:
+        hit_entities = matches.get(result.chunk_id)
+        if not hit_entities:
+            continue
+        boost = round(min(len(hit_entities) * CONCEPT_BOOST_WEIGHT, 0.18), 6)
+        result.final_score += boost
+        explanation = result.score_explanation or {}
+        explanation["concept_boost"] = boost
+        explanation["concept_matches"] = [
+            {"id": entity_id, "canonical_name": by_id[entity_id]["canonical_name"]}
+            for entity_id in sorted(hit_entities)
+            if entity_id in by_id
+        ]
+        explanation["final_score"] = result.final_score
+        result.score_explanation = explanation
+
+
 def hybrid_search(
     connection: sqlite3.Connection,
     query: str,
@@ -143,9 +179,13 @@ def hybrid_search(
     keyword_weight: float = 0.3,
     filters: SearchFilters | None = None,
     use_rerank: bool | None = None,
+    use_concept_boost: bool | None = None,
 ) -> list[RetrievalResult]:
     filters = _normalize_filters(filters)
     should_rerank = settings.enable_reranking if use_rerank is None else use_rerank
+    should_boost_concepts = (
+        settings.enable_concept_boost if use_concept_boost is None else use_concept_boost
+    )
     terms = query_terms(query)
     keyword_results = {result.chunk_id: result for result in keyword_search(connection, query, top_k=top_k * 2)}
     semantic_results = {result.chunk_id: result for result in semantic_search(connection, query, settings, top_k=top_k * 2)}
@@ -183,6 +223,8 @@ def hybrid_search(
             )
         )
     merged = [item for item in merged if _matches_filters(item, filters, metadata)]
+    if should_boost_concepts:
+        _apply_concept_boost(connection, merged, terms)
     merged.sort(key=lambda item: item.final_score, reverse=True)
     if should_rerank:
         chunk_texts = {chunk_id: str(item.get("text") or "") for chunk_id, item in metadata.items()}

@@ -101,6 +101,82 @@ def test_status_command_includes_config_diagnostics(tmp_path: Path, monkeypatch,
     assert {item["code"] for item in payload["config_diagnostics"]} == {"unsupported_provider", "vault_not_found"}
 
 
+def test_concepts_show_command_resolves_alias(
+    connection,
+    fixture_vault: Path,
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "DATABASE_PATH": str(settings.database_path),
+                "EMBEDDING_MODEL_NAME": settings.embedding_model_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["personal-memory", "--config", str(config_path), "concepts", "show", "--name", "North Star"],
+    )
+
+    main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["normalized_key"] == "project north star"
+    assert any(mention["extraction_method"] == "alias" for mention in payload["mentions"])
+
+
+def test_concepts_list_and_refresh_commands(
+    connection,
+    fixture_vault: Path,
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "DATABASE_PATH": str(settings.database_path),
+                "EMBEDDING_MODEL_NAME": settings.embedding_model_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["personal-memory", "--config", str(config_path), "concepts", "list", "--search", "north"],
+    )
+    main()
+    listed = json.loads(capsys.readouterr().out)
+    assert any(item["normalized_key"] == "project north star" for item in listed["concepts"])
+
+    connection.execute("DELETE FROM entity_mentions")
+    connection.execute("DELETE FROM entities")
+    connection.commit()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["personal-memory", "--config", str(config_path), "concepts", "refresh"],
+    )
+    main()
+    refreshed = json.loads(capsys.readouterr().out)
+    assert refreshed["entities"] > 0
+    assert refreshed["mentions"] > 0
+
+
 def test_ingest_isolates_per_file_failures(connection, fixture_vault: Path, settings: Settings, monkeypatch) -> None:
     original = register._ingest_single_document
     calls = {"count": 0}

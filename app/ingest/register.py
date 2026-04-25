@@ -8,6 +8,7 @@ from typing import Iterable
 from app.config import Settings
 from app.models import ChunkRecord, ParsedDocument
 from app.processing.chunker import chunk_document
+from app.processing.concepts import ConceptMention, extract_concept_mentions
 from app.processing.embeddings import embed_texts
 from app.util.hashing import sha256_text
 from app.util.logging import get_logger
@@ -179,6 +180,74 @@ def _insert_chunks(connection: sqlite3.Connection, document_id: int, title: str,
     return chunk_ids
 
 
+def _upsert_entity(connection: sqlite3.Connection, mention: ConceptMention) -> int:
+    now = utc_now_iso()
+    row = connection.execute(
+        "SELECT id, canonical_name FROM entities WHERE normalized_key = ?",
+        (mention.normalized_key,),
+    ).fetchone()
+    if row is None:
+        cursor = connection.execute(
+            """
+            INSERT INTO entities (canonical_name, normalized_key, entity_type, metadata_json, mention_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 0, ?, ?)
+            """,
+            (mention.canonical_name, mention.normalized_key, "concept", "{}", now, now),
+        )
+        return int(cursor.lastrowid)
+    entity_id = int(row["id"])
+    if not row["canonical_name"] and mention.canonical_name:
+        connection.execute(
+            "UPDATE entities SET canonical_name = ?, updated_at = ? WHERE id = ?",
+            (mention.canonical_name, now, entity_id),
+        )
+    return entity_id
+
+
+def _insert_concept_mentions(
+    connection: sqlite3.Connection,
+    chunk_ids: list[int],
+    mentions: list[ConceptMention],
+) -> int:
+    if not mentions or not chunk_ids:
+        return 0
+    now = utc_now_iso()
+    inserted = 0
+    for mention in mentions:
+        if mention.chunk_index < 0 or mention.chunk_index >= len(chunk_ids):
+            continue
+        chunk_id = chunk_ids[mention.chunk_index]
+        entity_id = _upsert_entity(connection, mention)
+        cursor = connection.execute(
+            """
+            INSERT OR IGNORE INTO entity_mentions
+                (entity_id, chunk_id, mention_text, extraction_method, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (entity_id, chunk_id, mention.mention_text, mention.extraction_method, now),
+        )
+        if cursor.rowcount:
+            inserted += 1
+    return inserted
+
+
+def _refresh_entity_mention_counts(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        UPDATE entities
+        SET mention_count = COALESCE(
+            (SELECT COUNT(*) FROM entity_mentions WHERE entity_id = entities.id),
+            0
+        )
+        """
+    )
+
+
+def _prune_orphan_entities(connection: sqlite3.Connection) -> int:
+    cursor = connection.execute("DELETE FROM entities WHERE mention_count = 0")
+    return cursor.rowcount or 0
+
+
 def _insert_embeddings(connection: sqlite3.Connection, chunk_ids: list[int], texts: list[str], settings: Settings) -> None:
     vectors = embed_texts(texts, settings.embedding_model_name)
     connection.executemany(
@@ -227,6 +296,8 @@ def _ingest_single_document(
     chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
     if chunk_ids:
         _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
+        mentions = extract_concept_mentions(parsed, chunks)
+        _insert_concept_mentions(connection, chunk_ids, mentions)
     LOGGER.info("Indexed %s with %d chunks", path, len(chunk_ids))
     return "indexed", document_id, warnings
 
@@ -270,6 +341,9 @@ def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Set
     except Exception:
         _record_run(connection, "ingest", vault_path, "failed", counts["indexed"], run_id=run_id)
         raise
+    _refresh_entity_mention_counts(connection)
+    pruned_entities = _prune_orphan_entities(connection)
+    connection.commit()
     final_status = "completed" if not failures else "completed_with_errors"
     _record_run(connection, "ingest", vault_path, final_status, counts["indexed"], run_id=run_id)
     return {
@@ -284,12 +358,15 @@ def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Set
         "warnings": warnings,
         "changed_document_ids": changed_document_ids,
         "removed_document_ids": removed_document_ids,
+        "pruned_entities": pruned_entities,
         "scope": {"include": list(include), "exclude": list(exclude)},
     }
 
 
 def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Settings) -> dict[str, object]:
     run_id = _record_run(connection, "reindex", vault_path, "running")
+    connection.execute("DELETE FROM entity_mentions")
+    connection.execute("DELETE FROM entities")
     connection.execute("DELETE FROM embeddings")
     connection.execute("DELETE FROM chunks_fts")
     connection.execute("DELETE FROM chunks")
@@ -314,6 +391,8 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
                 chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
                 if chunk_ids:
                     _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
+                    mentions = extract_concept_mentions(parsed, chunks)
+                    _insert_concept_mentions(connection, chunk_ids, mentions)
                 indexed += 1
                 changed_document_ids.append(document_id)
                 if file_warnings:
@@ -324,6 +403,9 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
     except Exception:
         _record_run(connection, "reindex", vault_path, "failed", indexed, run_id=run_id)
         raise
+    _refresh_entity_mention_counts(connection)
+    pruned_entities = _prune_orphan_entities(connection)
+    connection.commit()
     final_status = "completed" if not failures else "completed_with_errors"
     _record_run(connection, "reindex", vault_path, final_status, indexed, run_id=run_id)
     return {
@@ -338,7 +420,89 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
         "warnings": warnings,
         "changed_document_ids": changed_document_ids,
         "removed_document_ids": [],
+        "pruned_entities": pruned_entities,
         "scope": {"include": list(include), "exclude": list(exclude)},
+    }
+
+
+def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
+    """Rebuild the concept layer from existing chunks without touching documents/embeddings."""
+    connection.execute("DELETE FROM entity_mentions")
+    connection.execute("DELETE FROM entities")
+    connection.commit()
+    rows = connection.execute(
+        """
+        SELECT
+            d.id AS document_id,
+            d.source_path,
+            d.title,
+            d.frontmatter_json
+        FROM documents d
+        ORDER BY d.id
+        """
+    ).fetchall()
+
+    indexed_documents = 0
+    total_mentions = 0
+    for row in rows:
+        document_id = int(row["document_id"])
+        chunk_rows = connection.execute(
+            """
+            SELECT id, chunk_index, section_title, text
+            FROM chunks WHERE document_id = ? ORDER BY chunk_index
+            """,
+            (document_id,),
+        ).fetchall()
+        if not chunk_rows:
+            continue
+
+        chunk_records: list[ChunkRecord] = [
+            ChunkRecord(
+                chunk_index=int(c["chunk_index"]),
+                section_title=c["section_title"],
+                text=c["text"],
+                token_estimate=0,
+                char_start=0,
+                char_end=0,
+            )
+            for c in chunk_rows
+        ]
+        chunk_ids = [int(c["id"]) for c in chunk_rows]
+
+        try:
+            frontmatter = json.loads(row["frontmatter_json"] or "{}")
+        except json.JSONDecodeError:
+            frontmatter = {}
+        tags_raw = frontmatter.get("tags") or []
+        aliases_raw = frontmatter.get("aliases") or []
+        tags = [str(item).strip() for item in (tags_raw if isinstance(tags_raw, list) else [tags_raw]) if str(item).strip()]
+        aliases = [str(item).strip() for item in (aliases_raw if isinstance(aliases_raw, list) else [aliases_raw]) if str(item).strip()]
+
+        parsed = ParsedDocument(
+            source_path=Path(row["source_path"]),
+            title=row["title"],
+            raw_text="",
+            normalized_text="",
+            frontmatter=frontmatter,
+            tags=tags,
+            aliases=aliases,
+        )
+        mentions = extract_concept_mentions(parsed, chunk_records)
+        total_mentions += _insert_concept_mentions(connection, chunk_ids, mentions)
+        indexed_documents += 1
+
+    _refresh_entity_mention_counts(connection)
+    pruned_entities = _prune_orphan_entities(connection)
+    connection.commit()
+
+    entity_count = int(
+        connection.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
+    )
+    return {
+        "documents": indexed_documents,
+        "mentions": total_mentions,
+        "entities": entity_count,
+        "pruned_entities": pruned_entities,
     }
 
 

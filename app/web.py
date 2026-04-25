@@ -13,8 +13,9 @@ from urllib.parse import parse_qs, urlparse
 
 from app.config import Settings
 from app.db import connect, init_db
-from app.ingest.register import ingest_vault, status_summary
+from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
+from app.retrieval.concept_search import get_concept_detail, list_concepts
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.util.timestamps import utc_now_iso
@@ -395,20 +396,79 @@ def handle_api_get(
     if parsed.path == "/api/viz":
         data = with_connection(lambda conn: _compute_viz_data(conn))
         return HTTPStatus.OK, _success_payload(data)
+    if parsed.path == "/api/concepts":
+        query_params = parse_qs(parsed.query)
+        search = query_params.get("search", [""])[0].strip() or None
+        limit = _read_top_k(query_params.get("limit", ["50"])[0], 50)
+        offset_raw = query_params.get("offset", ["0"])[0]
+        try:
+            offset = max(0, int(offset_raw))
+        except (TypeError, ValueError) as exc:
+            raise APIError(
+                "invalid_offset",
+                "offset must be a non-negative integer.",
+                status=HTTPStatus.BAD_REQUEST,
+                details={"field": "offset"},
+            ) from exc
+        concepts = with_connection(
+            lambda conn: list_concepts(conn, search=search, limit=limit, offset=offset)
+        )
+        return HTTPStatus.OK, _success_payload(
+            {"concepts": concepts, "count": len(concepts), "search": search, "limit": limit, "offset": offset}
+        )
+    if parsed.path.startswith("/api/concepts/"):
+        suffix = parsed.path[len("/api/concepts/"):].strip("/")
+        if not suffix:
+            raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
+        try:
+            concept_id = int(suffix)
+        except ValueError as exc:
+            raise APIError(
+                "invalid_concept_id",
+                "concept id must be an integer.",
+                status=HTTPStatus.BAD_REQUEST,
+                details={"field": "concept_id"},
+            ) from exc
+        detail = with_connection(lambda conn: get_concept_detail(conn, concept_id))
+        if detail is None:
+            raise APIError(
+                "concept_not_found",
+                f"Concept {concept_id} was not found.",
+                status=HTTPStatus.NOT_FOUND,
+                details={"concept_id": concept_id},
+            )
+        return HTTPStatus.OK, _success_payload(detail)
     if parsed.path == "/api/search":
         query_params = parse_qs(parsed.query)
         query = query_params.get("query", [""])[0].strip()
         top_k = _read_top_k(query_params.get("top_k", [settings.top_k])[0], settings.top_k)
         use_rerank = _read_bool_query(query_params, "rerank", settings.enable_reranking)
+        use_concept_boost = _read_bool_query(query_params, "concept_boost", settings.enable_concept_boost)
         filters = _read_filters_from_query(path)
         if not query:
             return HTTPStatus.OK, _success_payload({"results": []})
         results = with_connection(
             lambda conn: [
-                asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k, filters=filters, use_rerank=use_rerank)
+                asdict(item)
+                for item in hybrid_search(
+                    conn,
+                    query,
+                    settings,
+                    top_k=top_k,
+                    filters=filters,
+                    use_rerank=use_rerank,
+                    use_concept_boost=use_concept_boost,
+                )
             ]
         )
-        return HTTPStatus.OK, _success_payload({"results": results, "filters": _serialize_filters(filters), "rerank": use_rerank})
+        return HTTPStatus.OK, _success_payload(
+            {
+                "results": results,
+                "filters": _serialize_filters(filters),
+                "rerank": use_rerank,
+                "concept_boost": use_concept_boost,
+            }
+        )
     raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
 
 
@@ -429,7 +489,12 @@ def handle_api_post(
             )
         refresh_state.begin()
         try:
-            summary = with_connection(lambda conn: ingest_vault(conn, settings.vault_path, settings))
+            summary = with_connection(
+                lambda conn: {
+                    **ingest_vault(conn, settings.vault_path, settings),
+                    "concepts": refresh_concepts(conn),
+                }
+            )
         except Exception as exc:
             refresh_state.finish({"status": "failed", "error": str(exc)})
             raise APIError(
@@ -440,6 +505,9 @@ def handle_api_post(
             ) from exc
         refresh_state.finish(dict(summary))
         return HTTPStatus.OK, _success_payload(summary)
+    if parsed.path == "/api/concepts/refresh":
+        result = with_connection(lambda conn: refresh_concepts(conn))
+        return HTTPStatus.OK, _success_payload(result)
     if parsed.path != "/api/chat":
         raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
 
@@ -458,6 +526,7 @@ def handle_api_post(
     use_llm = _read_bool(payload, "use_llm", settings.enable_llm_synthesis)
     use_query_rewrite = _read_bool(payload, "rewrite_query", settings.enable_query_rewrite)
     use_rerank = _read_bool(payload, "rerank", settings.enable_reranking)
+    use_concept_boost = _read_bool(payload, "concept_boost", settings.enable_concept_boost)
     filters = _read_filters(payload)
 
     request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
@@ -472,11 +541,13 @@ def handle_api_post(
             use_llm=use_llm,
             use_query_rewrite=use_query_rewrite,
             use_rerank=use_rerank,
+            use_concept_boost=use_concept_boost,
             filters=filters,
         )
     )
     response["filters"] = _serialize_filters(filters)
     response["rerank"] = use_rerank
+    response["concept_boost"] = use_concept_boost
     return HTTPStatus.OK, _success_payload(response)
 
 

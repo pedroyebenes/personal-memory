@@ -8,7 +8,8 @@ import sys
 
 from app.config import format_diagnostics, load_settings
 from app.db import connect, init_db
-from app.ingest.register import ingest_vault, reindex_vault, status_summary
+from app.ingest.register import ingest_vault, refresh_concepts, reindex_vault, status_summary
+from app.retrieval.concept_search import find_concept, get_concept_detail, list_concepts
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.retrieval.query_rewrite import resolve_retrieval_query
@@ -38,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--top-k", type=int)
     search_parser.add_argument("--rewrite-query", action="store_true")
     search_parser.add_argument("--rerank", action="store_true")
+    search_parser.add_argument("--concept-boost", action="store_true")
 
     ask_parser = subparsers.add_parser("ask")
     ask_parser.add_argument("--query", required=True)
@@ -45,10 +47,26 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument("--use-llm", action="store_true")
     ask_parser.add_argument("--rewrite-query", action="store_true")
     ask_parser.add_argument("--rerank", action="store_true")
+    ask_parser.add_argument("--concept-boost", action="store_true")
 
     web_parser = subparsers.add_parser("web")
     web_parser.add_argument("--host", default="0.0.0.0")
     web_parser.add_argument("--port", type=int, default=8000)
+
+    concepts_parser = subparsers.add_parser("concepts")
+    concepts_sub = concepts_parser.add_subparsers(dest="concepts_command", required=True)
+
+    list_parser = concepts_sub.add_parser("list")
+    list_parser.add_argument("--limit", type=int, default=50)
+    list_parser.add_argument("--offset", type=int, default=0)
+    list_parser.add_argument("--search", default=None)
+
+    show_parser = concepts_sub.add_parser("show")
+    show_group = show_parser.add_mutually_exclusive_group(required=True)
+    show_group.add_argument("--id", type=int, dest="concept_id")
+    show_group.add_argument("--name", type=str, dest="concept_name")
+
+    concepts_sub.add_parser("refresh")
     return parser
 
 
@@ -126,6 +144,7 @@ def main() -> None:
             settings,
             top_k=args.top_k or settings.top_k,
             use_rerank=args.rerank or None,
+            use_concept_boost=args.concept_boost or None,
         )
         print(
             json.dumps(
@@ -149,9 +168,31 @@ def main() -> None:
             use_llm=args.use_llm or None,
             use_query_rewrite=args.rewrite_query or None,
             use_rerank=args.rerank or None,
+            use_concept_boost=args.concept_boost or None,
         )
         print(json.dumps(response, indent=2))
         return
+
+    if args.command == "concepts":
+        if args.concepts_command == "list":
+            concepts = list_concepts(connection, search=args.search, limit=args.limit, offset=args.offset)
+            print(json.dumps({"concepts": concepts, "count": len(concepts)}, indent=2))
+            return
+        if args.concepts_command == "show":
+            if args.concept_id is not None:
+                detail = get_concept_detail(connection, args.concept_id)
+            else:
+                concept = find_concept(connection, name=args.concept_name)
+                detail = get_concept_detail(connection, int(concept["id"])) if concept else None
+            if detail is None:
+                print(json.dumps({"error": "concept_not_found"}, indent=2))
+                sys.exit(1)
+            print(json.dumps(detail, indent=2))
+            return
+        if args.concepts_command == "refresh":
+            print(json.dumps(refresh_concepts(connection), indent=2))
+            return
+        raise SystemExit(f"Unknown concepts subcommand: {args.concepts_command}")
 
     if args.command == "web":
         connection.close()

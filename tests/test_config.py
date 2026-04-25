@@ -13,7 +13,8 @@ def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
           "VAULT_PATH": "./vault",
           "DATABASE_PATH": "./data/cache/test.sqlite3",
           "TOP_K": 9,
-          "ENABLE_QUERY_REWRITE": true
+          "ENABLE_QUERY_REWRITE": true,
+          "ENABLE_CONCEPT_BOOST": true
         }
         """.strip(),
         encoding="utf-8",
@@ -25,9 +26,12 @@ def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
     assert settings.database_path == tmp_path / "data/cache/test.sqlite3"
     assert settings.top_k == 9
     assert settings.enable_query_rewrite is True
+    assert settings.enable_concept_boost is True
 
 
-def test_environment_variables_override_json_config(tmp_path: Path, monkeypatch) -> None:
+def test_environment_variables_override_json_config(
+    tmp_path: Path, monkeypatch
+) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         """
@@ -88,7 +92,7 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
           "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
           "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
           "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
-          "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e4b-it-q4_K_M"
+          "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b"
         }
         """.strip(),
         encoding="utf-8",
@@ -99,7 +103,7 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
     assert settings.get_synthesis_model_name("openai") == "gpt-5-mini"
     assert settings.get_synthesis_model_name("gemini") == "gemini-2.5-flash"
     assert settings.get_synthesis_model_name("nvidia") == "z-ai/glm-4.7"
-    assert settings.get_synthesis_model_name("ollama") == "gemma4:e4b-it-q4_K_M"
+    assert settings.get_synthesis_model_name("ollama") == "gemma4:e2b"
 
 
 def test_provider_availability_marks_missing_keys() -> None:
@@ -123,7 +127,10 @@ def test_validate_reports_invalid_provider_and_missing_vault(tmp_path: Path) -> 
 
     diagnostics = settings.validate()
 
-    assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
+    assert {item["code"] for item in diagnostics} == {
+        "unsupported_provider",
+        "vault_not_found",
+    }
 
 
 def test_validate_reports_provider_model_and_base_url_problems() -> None:
@@ -134,7 +141,10 @@ def test_validate_reports_provider_model_and_base_url_problems() -> None:
 
     diagnostics = settings.validate()
 
-    assert {item["code"] for item in diagnostics} >= {"missing_provider_model", "invalid_provider_base_url"}
+    assert {item["code"] for item in diagnostics} >= {
+        "missing_provider_model",
+        "invalid_provider_base_url",
+    }
 
 
 def test_load_settings_rejects_invalid_top_k(tmp_path: Path) -> None:

@@ -57,9 +57,18 @@ def answer_question(
     use_query_rewrite: bool | None = None,
     filters: SearchFilters | None = None,
     use_rerank: bool | None = None,
+    use_concept_boost: bool | None = None,
 ) -> dict[str, object]:
     retrieval_query, warnings = resolve_retrieval_query(query, settings, use_query_rewrite=use_query_rewrite)
-    results = hybrid_search(connection, retrieval_query, settings, top_k=top_k, filters=filters, use_rerank=use_rerank)
+    results = hybrid_search(
+        connection,
+        retrieval_query,
+        settings,
+        top_k=top_k,
+        filters=filters,
+        use_rerank=use_rerank,
+        use_concept_boost=use_concept_boost,
+    )
     if not results:
         return {
             "question": query,
