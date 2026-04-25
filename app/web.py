@@ -335,6 +335,17 @@ def _parse_optional_string_filter(value: object, *, field: str) -> str | None:
     return value.strip() or None
 
 
+def _resolve_path_prefix_filter(path_prefix: str | None, settings: Settings) -> str | None:
+    if not path_prefix:
+        return None
+    expanded = Path(path_prefix).expanduser()
+    if expanded.is_absolute():
+        return str(expanded)
+    if settings.vault_path is None:
+        return path_prefix.strip()
+    return str((settings.vault_path / path_prefix).expanduser().resolve())
+
+
 def _parse_date_filter(value: object, *, field: str, end_of_day: bool = False) -> str | None:
     if value is None:
         return None
@@ -368,7 +379,7 @@ def _parse_date_filter(value: object, *, field: str, end_of_day: bool = False) -
     return parsed_datetime.replace(microsecond=0).isoformat()
 
 
-def _read_filters(payload: dict[str, Any]) -> SearchFilters:
+def _read_filters(payload: dict[str, Any], settings: Settings) -> SearchFilters:
     raw_filters = payload.get("filters", {})
     if raw_filters is None:
         raw_filters = {}
@@ -386,13 +397,16 @@ def _read_filters(payload: dict[str, Any]) -> SearchFilters:
     return SearchFilters(
         tags=_parse_csv_filter(raw_filters.get("tags")),
         aliases=_parse_csv_filter(raw_filters.get("aliases")),
-        path_prefix=_parse_optional_string_filter(raw_filters.get("path_prefix"), field="filters.path_prefix"),
+        path_prefix=_resolve_path_prefix_filter(
+            _parse_optional_string_filter(raw_filters.get("path_prefix"), field="filters.path_prefix"),
+            settings,
+        ),
         date_from=date_from,
         date_to=date_to,
     )
 
 
-def _read_filters_from_query(path: str) -> SearchFilters:
+def _read_filters_from_query(path: str, settings: Settings) -> SearchFilters:
     parsed = urlparse(path)
     query = parse_qs(parsed.query)
     date_from = _parse_date_filter(query.get("date_from", [""])[0], field="date_from")
@@ -407,7 +421,10 @@ def _read_filters_from_query(path: str) -> SearchFilters:
     return SearchFilters(
         tags=_parse_csv_filter(query.get("tags", [])),
         aliases=_parse_csv_filter(query.get("aliases", [])),
-        path_prefix=_parse_optional_string_filter(query.get("path_prefix", [""])[0], field="path_prefix"),
+        path_prefix=_resolve_path_prefix_filter(
+            _parse_optional_string_filter(query.get("path_prefix", [""])[0], field="path_prefix"),
+            settings,
+        ),
         date_from=date_from,
         date_to=date_to,
     )
@@ -509,7 +526,7 @@ def handle_api_get(
         top_k = _read_top_k(query_params.get("top_k", [settings.top_k])[0], settings.top_k)
         use_rerank = _read_bool_query(query_params, "rerank", settings.enable_reranking)
         use_concept_boost = _read_bool_query(query_params, "concept_boost", settings.enable_concept_boost)
-        filters = _read_filters_from_query(path)
+        filters = _read_filters_from_query(path, settings)
         if not query:
             return HTTPStatus.OK, _success_payload({"results": []})
         results = with_connection(
@@ -592,7 +609,7 @@ def handle_api_post(
     use_query_rewrite = _read_bool(payload, "rewrite_query", settings.enable_query_rewrite)
     use_rerank = _read_bool(payload, "rerank", settings.enable_reranking)
     use_concept_boost = _read_bool(payload, "concept_boost", settings.enable_concept_boost)
-    filters = _read_filters(payload)
+    filters = _read_filters(payload, settings)
 
     request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
     _validate_provider_request(request_settings, provider, require_provider=use_llm or use_query_rewrite)

@@ -20,9 +20,11 @@ def test_web_assets_are_split_and_linked() -> None:
     assert '<script src="/static/app.js"></script>' in html
     assert "HTML_PAGE" not in html
     assert 'id="top-k"' in html
+    assert 'placeholder="books/ or projects/"' in html
     assert ".layout" in css
     assert "function renderAnswerWorkspaces" in js
     assert "top_k: readTopK()" in js
+    assert "vault path:" in js
     assert 'id="viz-search"' in viz_html
     assert 'id="label-lines"' in viz_html
 
@@ -282,6 +284,31 @@ def test_search_filters_by_modified_date_range(connection, fixture_vault: Path, 
     assert all("project-note.md" in item["source_path"] for item in payload["results"])
 
 
+def test_search_resolves_relative_path_prefix_against_vault(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    books = vault / "books"
+    notes = vault / "notes"
+    books.mkdir(parents=True)
+    notes.mkdir()
+    (books / "book.md").write_text("# Book Note\n\nShared phrase about windmills and knights.", encoding="utf-8")
+    (notes / "note.md").write_text("# Plain Note\n\nShared phrase about windmills outside books.", encoding="utf-8")
+    settings.vault_path = vault
+    ingest_vault(connection, vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/search?query=windmills&path_prefix=books/",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["filters"]["path_prefix"] == str(books.resolve())
+    assert payload["results"]
+    assert all("/books/" in item["source_path"] for item in payload["results"])
+
+
 def test_search_rejects_invalid_date_range(settings: Settings) -> None:
     try:
         handle_api_get("/api/search?query=test&date_from=2025-01-01&date_to=2024-01-01", settings, RefreshState(), lambda callback: callback)
@@ -452,3 +479,29 @@ def test_chat_treats_null_path_prefix_as_no_filter(connection, fixture_vault: Pa
     assert payload["filters"]["path_prefix"] is None
     assert payload["sources"]
     assert "retrieval returned no evidence" not in payload["warnings"]
+
+
+def test_chat_resolves_relative_path_prefix_against_vault(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    books = vault / "books"
+    notes = vault / "notes"
+    books.mkdir(parents=True)
+    notes.mkdir()
+    (books / "book.md").write_text("# Book Note\n\nSancho Panza appears in this book note.", encoding="utf-8")
+    (notes / "note.md").write_text("# Plain Note\n\nSancho Panza appears in this plain note.", encoding="utf-8")
+    settings.vault_path = vault
+    ingest_vault(connection, vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/chat",
+        {"query": "Where does Sancho appear?", "filters": {"path_prefix": "books/"}},
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["filters"]["path_prefix"] == str(books.resolve())
+    assert payload["sources"]
+    assert all("/books/" in item["source_path"] for item in payload["sources"])

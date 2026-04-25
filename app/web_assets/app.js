@@ -98,7 +98,7 @@
         const labels = [];
         if (filters.tags?.length) labels.push(`tags: ${filters.tags.join(", ")}`);
         if (filters.aliases?.length) labels.push(`aliases: ${filters.aliases.join(", ")}`);
-        if (filters.path_prefix) labels.push(`path: ${filters.path_prefix}`);
+        if (filters.path_prefix) labels.push(`vault path: ${filters.path_prefix}`);
         if (filters.date_from) labels.push(`from: ${filters.date_from}`);
         if (filters.date_to) labels.push(`to: ${filters.date_to}`);
         return labels;
