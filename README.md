@@ -123,12 +123,13 @@ Compose mounts:
 - `./app` into the container for code changes
 - `./data` for the SQLite database
 - `${HOST_VAULT_PATH:-./data/vault}` from the host into `/vault` in the container
-- `./config.json` as the runtime configuration file
+- `./config_docker.json` as the runtime configuration file
 
 Compose also sets:
 
 - `OLLAMA_BASE_URL=http://host.docker.internal:11434/api` so the container can reach an Ollama server running on your host machine
 - `VAULT_PATH=/vault` so the app reads notes from the mounted host vault
+- `DATABASE_PATH=/app/data/cache/memory.sqlite3` so the SQLite index persists under `./data`
 
 If your Obsidian vault lives outside the repo on the host, point Compose at it when you start the app:
 

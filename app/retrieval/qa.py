@@ -22,6 +22,11 @@ def _build_sources(results) -> list[dict[str, object]]:
                 "section_title": result.section_title,
                 "snippet": result.snippet,
                 "source_ref": f"{result.source_path}#{anchor}" if anchor else result.source_path,
+                "keyword_score": result.keyword_score,
+                "semantic_score": result.semantic_score,
+                "metadata_score": result.metadata_score,
+                "final_score": result.final_score,
+                "score_explanation": result.score_explanation,
             }
         )
     return sources

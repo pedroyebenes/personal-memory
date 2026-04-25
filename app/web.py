@@ -903,7 +903,9 @@ HTML_PAGE = """<!doctype html>
           snippet.textContent = item.snippet;
           const meta = document.createElement("div");
           meta.className = "source-meta";
-          meta.textContent = item.source_ref || item.source_path;
+          const score = typeof item.final_score === "number" ? `\nFinal score: ${item.final_score.toFixed(3)}` : "";
+          const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
+          meta.textContent = `${item.source_ref || item.source_path}${score}${metadata}`;
           const actions = document.createElement("div");
           actions.className = "action-row";
           const button = document.createElement("button");
@@ -949,7 +951,8 @@ HTML_PAGE = """<!doctype html>
           snippet.textContent = item.snippet;
           const meta = document.createElement("div");
           meta.className = "search-meta";
-          meta.textContent = `Final score: ${item.final_score.toFixed(3)}`;
+          const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
+          meta.textContent = `Final score: ${item.final_score.toFixed(3)}${metadata}`;
           const actions = document.createElement("div");
           actions.className = "action-row";
           const button = document.createElement("button");

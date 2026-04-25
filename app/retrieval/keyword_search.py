@@ -4,6 +4,7 @@ import re
 import sqlite3
 
 from app.models import RetrievalResult
+from app.retrieval.snippets import extract_snippet
 
 
 def _build_fts_query(query: str) -> str:
@@ -45,7 +46,7 @@ def keyword_search(connection: sqlite3.Connection, query: str, top_k: int = 5) -
                 chunk_id=int(row["chunk_id"]),
                 chunk_index=int(row["chunk_index"]),
                 section_title=row["section_title"],
-                snippet=row["text"][:280],
+                snippet=extract_snippet(row["text"], query),
                 keyword_score=keyword_score,
                 semantic_score=None,
                 final_score=keyword_score,

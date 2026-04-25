@@ -6,6 +6,7 @@ import sqlite3
 from app.config import Settings
 from app.models import RetrievalResult
 from app.processing.embeddings import cosine_similarity, embed_texts
+from app.retrieval.snippets import extract_snippet
 
 
 def semantic_search(connection: sqlite3.Connection, query: str, settings: Settings, top_k: int = 5) -> list[RetrievalResult]:
@@ -38,7 +39,7 @@ def semantic_search(connection: sqlite3.Connection, query: str, settings: Settin
                 chunk_id=int(row["chunk_id"]),
                 chunk_index=int(row["chunk_index"]),
                 section_title=row["section_title"],
-                snippet=row["text"][:280],
+                snippet=extract_snippet(row["text"], query),
                 keyword_score=None,
                 semantic_score=semantic_score,
                 final_score=semantic_score,

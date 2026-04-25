@@ -4,8 +4,15 @@ services:
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434/api
       VAULT_PATH: /vault
+      DATABASE_PATH: /app/data/cache/memory.sqlite3
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
       NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      HF_HOME: /app/data/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/data/sentence-transformers
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -15,5 +22,5 @@ services:
       - ./app:/app/app
       - ./data:/app/data
       - ${HOST_VAULT_PATH:-./data/vault}:/vault:ro
-      - ./config.json:/app/config.json
+      - ./config_docker.json:/app/config.json:ro
     command: ["personal-memory", "--config", "/app/config.json", "web", "--host", "0.0.0.0", "--port", "8000"]

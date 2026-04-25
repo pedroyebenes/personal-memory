@@ -30,7 +30,7 @@ def test_hybrid_score_merge(connection, fixture_vault, settings: Settings) -> No
 def test_hybrid_search_filters_by_tag_and_alias(connection, fixture_vault, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
 
-    tag_filtered = hybrid_search(connection, "launch plan", settings, top_k=5, filters=SearchFilters(tags=("project",)))
+    tag_filtered = hybrid_search(connection, "launch plan", settings, top_k=5, filters=SearchFilters(tags=("PROJECT",)))
     alias_filtered = hybrid_search(
         connection,
         "launch plan",
@@ -43,3 +43,34 @@ def test_hybrid_search_filters_by_tag_and_alias(connection, fixture_vault, setti
     assert all("project-note.md" in item.source_path for item in tag_filtered)
     assert alias_filtered
     assert all("project-note.md" in item.source_path for item in alias_filtered)
+
+
+def test_hybrid_search_exposes_metadata_ranking_debug(connection, fixture_vault, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+
+    results = hybrid_search(connection, "North Star", settings, top_k=3)
+
+    assert results
+    top = results[0]
+    assert "project-note.md" in top.source_path
+    assert top.metadata_score > 0
+    assert top.score_explanation is not None
+    assert "metadata_factors" in top.score_explanation
+    assert top.score_explanation["final_score"] == top.final_score
+
+
+def test_hybrid_search_snippet_centers_matched_evidence(connection, tmp_path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    lead_in = " ".join(f"filler{i}" for i in range(120))
+    (vault / "evidence.md").write_text(
+        f"# Evidence\n\n{lead_in}\n\nNeedle evidence is the important sentence for retrieval quality.",
+        encoding="utf-8",
+    )
+    ingest_vault(connection, vault, settings)
+
+    results = hybrid_search(connection, "needle", settings, top_k=1)
+
+    assert results
+    assert "Needle evidence" in results[0].snippet
+    assert "filler0" not in results[0].snippet

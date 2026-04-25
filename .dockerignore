@@ -1,0 +1,14 @@
+.git
+.venv
+.pytest_cache
+.uv-cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+build
+data/cache
+data/huggingface
+data/sentence-transformers
+config.json
