@@ -399,6 +399,15 @@ def handle_api_get(
     if parsed.path == "/api/concepts":
         query_params = parse_qs(parsed.query)
         search = query_params.get("search", [""])[0].strip() or None
+        entity_type_raw = query_params.get("type", ["concept"])[0].strip().lower()
+        if entity_type_raw not in {"concept", "structure", "all"}:
+            raise APIError(
+                "invalid_concept_type",
+                "type must be one of concept, structure, or all.",
+                status=HTTPStatus.BAD_REQUEST,
+                details={"field": "type"},
+            )
+        entity_type = None if entity_type_raw == "all" else entity_type_raw
         limit = _read_top_k(query_params.get("limit", ["50"])[0], 50)
         offset_raw = query_params.get("offset", ["0"])[0]
         try:
@@ -411,10 +420,17 @@ def handle_api_get(
                 details={"field": "offset"},
             ) from exc
         concepts = with_connection(
-            lambda conn: list_concepts(conn, search=search, limit=limit, offset=offset)
+            lambda conn: list_concepts(conn, search=search, entity_type=entity_type, limit=limit, offset=offset)
         )
         return HTTPStatus.OK, _success_payload(
-            {"concepts": concepts, "count": len(concepts), "search": search, "limit": limit, "offset": offset}
+            {
+                "concepts": concepts,
+                "count": len(concepts),
+                "search": search,
+                "type": entity_type_raw,
+                "limit": limit,
+                "offset": offset,
+            }
         )
     if parsed.path.startswith("/api/concepts/"):
         suffix = parsed.path[len("/api/concepts/"):].strip("/")

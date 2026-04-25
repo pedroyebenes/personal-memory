@@ -24,6 +24,17 @@ from app.models import ChunkRecord, ParsedDocument
 
 WIKILINK_PATTERN = re.compile(r"\[\[([^\[\]\|]+)(?:\|([^\[\]]+))?\]\]")
 _WHITESPACE = re.compile(r"\s+")
+_STRUCTURAL_LABEL_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\d+$"),
+    re.compile(r"^[ivxlcdm]+$"),
+    re.compile(r"^\d{4}\s+\d{1,2}\s+\d{1,2}$"),
+    re.compile(r"^.+\.(?:md|txt|html|xhtml|xml)$"),
+    re.compile(
+        r"^(?:cap[ií]tulo|chapter|part|parte|book|libro|section|secci[oó]n)\s+"
+        r"(?:[ivxlcdm]+|\d+|primero|segundo|tercero|cuarto|quinto|sexto|s[eé]ptimo|octavo|noveno|d[eé]cimo)$"
+    ),
+)
+_STRUCTURAL_METHODS = {"heading", "title", "filename"}
 
 
 EXTRACTION_METHODS: tuple[str, ...] = (
@@ -40,6 +51,7 @@ EXTRACTION_METHODS: tuple[str, ...] = (
 class ConceptMention:
     canonical_name: str
     normalized_key: str
+    entity_type: str
     mention_text: str
     extraction_method: str
     chunk_index: int
@@ -49,6 +61,15 @@ def normalize_key(value: str) -> str:
     cleaned = value.replace("_", " ").replace("-", " ")
     cleaned = _WHITESPACE.sub(" ", cleaned).strip().lower()
     return cleaned
+
+
+def classify_entity_type(value: str, method: str) -> str:
+    if method not in _STRUCTURAL_METHODS:
+        return "concept"
+    key = normalize_key(value)
+    if any(pattern.match(key) for pattern in _STRUCTURAL_LABEL_PATTERNS):
+        return "structure"
+    return "concept"
 
 
 def _make_mention(name: str, mention_text: str, method: str, chunk_index: int) -> ConceptMention | None:
@@ -61,6 +82,7 @@ def _make_mention(name: str, mention_text: str, method: str, chunk_index: int) -
     return ConceptMention(
         canonical_name=canonical,
         normalized_key=key,
+        entity_type=classify_entity_type(canonical, method),
         mention_text=mention_text.strip() or canonical,
         extraction_method=method,
         chunk_index=chunk_index,
@@ -127,6 +149,7 @@ def extract_concept_mentions(parsed: ParsedDocument, chunks: list[ChunkRecord]) 
             ConceptMention(
                 canonical_name=canonical,
                 normalized_key=title_key or alias_key,
+                entity_type=title_mention.entity_type if title_mention else "concept",
                 mention_text=alias,
                 extraction_method="alias",
                 chunk_index=first_chunk_index,

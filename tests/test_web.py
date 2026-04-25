@@ -368,6 +368,55 @@ def test_concepts_api_lists_details_and_refreshes(connection, fixture_vault: Pat
     assert refreshed["mentions"] > 0
 
 
+def test_concepts_api_filters_by_entity_type(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "chapter.md").write_text(
+        "# CAPÍTULO XL\n\nBody mentions [[Project North Star]].\n\n## Research Agenda\n\nNotes.",
+        encoding="utf-8",
+    )
+    ingest_vault(connection, vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, concepts = handle_api_get(
+        "/api/concepts?type=concept&limit=50",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+    status_structures, structures = handle_api_get(
+        "/api/concepts?type=structure&limit=50",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert concepts["type"] == "concept"
+    assert "capítulo xl" not in {item["normalized_key"] for item in concepts["concepts"]}
+    assert int(status_structures) == 200
+    assert structures["type"] == "structure"
+    assert "capítulo xl" in {item["normalized_key"] for item in structures["concepts"]}
+
+
+def test_concepts_api_rejects_invalid_entity_type(settings: Settings) -> None:
+    try:
+        handle_api_get(
+            "/api/concepts?type=invalid",
+            settings,
+            RefreshState(),
+            lambda callback: callback,
+        )
+    except APIError as exc:
+        status = exc.status
+        payload = _error_payload(exc)
+    else:
+        raise AssertionError("Expected APIError")
+
+    assert int(status) == 400
+    assert payload["error"]["code"] == "invalid_concept_type"
+
+
 def test_chat_treats_null_path_prefix_as_no_filter(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     with_connection = lambda callback: callback(connection)

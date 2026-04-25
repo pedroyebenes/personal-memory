@@ -183,7 +183,7 @@ def _insert_chunks(connection: sqlite3.Connection, document_id: int, title: str,
 def _upsert_entity(connection: sqlite3.Connection, mention: ConceptMention) -> int:
     now = utc_now_iso()
     row = connection.execute(
-        "SELECT id, canonical_name FROM entities WHERE normalized_key = ?",
+        "SELECT id, canonical_name, entity_type FROM entities WHERE normalized_key = ?",
         (mention.normalized_key,),
     ).fetchone()
     if row is None:
@@ -192,7 +192,7 @@ def _upsert_entity(connection: sqlite3.Connection, mention: ConceptMention) -> i
             INSERT INTO entities (canonical_name, normalized_key, entity_type, metadata_json, mention_count, created_at, updated_at)
             VALUES (?, ?, ?, ?, 0, ?, ?)
             """,
-            (mention.canonical_name, mention.normalized_key, "concept", "{}", now, now),
+            (mention.canonical_name, mention.normalized_key, mention.entity_type, "{}", now, now),
         )
         return int(cursor.lastrowid)
     entity_id = int(row["id"])
@@ -200,6 +200,11 @@ def _upsert_entity(connection: sqlite3.Connection, mention: ConceptMention) -> i
         connection.execute(
             "UPDATE entities SET canonical_name = ?, updated_at = ? WHERE id = ?",
             (mention.canonical_name, now, entity_id),
+        )
+    if row["entity_type"] != "concept" and mention.entity_type == "concept":
+        connection.execute(
+            "UPDATE entities SET entity_type = ?, updated_at = ? WHERE id = ?",
+            ("concept", now, entity_id),
         )
     return entity_id
 
@@ -498,10 +503,18 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
     entity_count = int(
         connection.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
     )
+    concept_count = int(
+        connection.execute("SELECT COUNT(*) AS count FROM entities WHERE entity_type = 'concept'").fetchone()["count"]
+    )
+    structure_count = int(
+        connection.execute("SELECT COUNT(*) AS count FROM entities WHERE entity_type = 'structure'").fetchone()["count"]
+    )
     return {
         "documents": indexed_documents,
         "mentions": total_mentions,
         "entities": entity_count,
+        "concepts": concept_count,
+        "structures": structure_count,
         "pruned_entities": pruned_entities,
     }
 

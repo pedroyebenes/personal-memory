@@ -177,6 +177,39 @@ def test_concepts_list_and_refresh_commands(
     assert refreshed["mentions"] > 0
 
 
+def test_concepts_list_command_can_show_structures(
+    connection,
+    tmp_path: Path,
+    settings: Settings,
+    monkeypatch,
+    capsys,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "chapter.md").write_text("# CAPÍTULO XL\n\nBody.", encoding="utf-8")
+    ingest_vault(connection, vault, settings)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "DATABASE_PATH": str(settings.database_path),
+                "EMBEDDING_MODEL_NAME": settings.embedding_model_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["personal-memory", "--config", str(config_path), "concepts", "list", "--type", "structure"],
+    )
+
+    main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert any(item["normalized_key"] == "capítulo xl" for item in payload["concepts"])
+
+
 def test_ingest_isolates_per_file_failures(connection, fixture_vault: Path, settings: Settings, monkeypatch) -> None:
     original = register._ingest_single_document
     calls = {"count": 0}

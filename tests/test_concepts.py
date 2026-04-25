@@ -10,6 +10,7 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, reindex_vault
 from app.models import ChunkRecord, ParsedDocument
 from app.processing.concepts import (
+    classify_entity_type,
     extract_concept_mentions,
     normalize_key,
 )
@@ -50,6 +51,16 @@ def test_normalize_key_collapses_case_and_separators() -> None:
     assert normalize_key("Project_North-Star") == "project north star"
     assert normalize_key("  Multi  Space  ") == "multi space"
     assert normalize_key("UPPER") == "upper"
+
+
+def test_classify_entity_type_splits_structures_from_concepts() -> None:
+    assert classify_entity_type("CAPÍTULO XL", "heading") == "structure"
+    assert classify_entity_type("2026-04-20", "title") == "structure"
+    assert classify_entity_type("2", "heading") == "structure"
+    assert classify_entity_type("IV", "heading") == "structure"
+    assert classify_entity_type("Text/intro2.xhtml", "heading") == "structure"
+    assert classify_entity_type("Project North Star", "heading") == "concept"
+    assert classify_entity_type("CAPÍTULO XL", "tag") == "concept"
 
 
 def test_init_db_migrates_nonempty_legacy_entities(tmp_path: Path) -> None:
@@ -113,6 +124,22 @@ def test_extract_concept_mentions_covers_all_sources(tmp_path: Path) -> None:
     assert by_method["alias"] == ["project north star", "project north star"]
     assert "project north star" in by_method["wikilink"]
     assert {"overview", "implementation plan"} == set(by_method["heading"])
+    assert {mention.entity_type for mention in mentions} == {"concept"}
+
+
+def test_extract_concept_mentions_marks_structural_headings(tmp_path: Path) -> None:
+    chunks = [
+        _make_chunk(0, "CAPÍTULO XL", "Chapter text."),
+        _make_chunk(1, "Research Agenda", "Semantic section."),
+    ]
+    parsed = _doc(tmp_path / "2026-04-20.md", title="2026-04-20")
+    mentions = extract_concept_mentions(parsed, chunks)
+
+    by_key = {mention.normalized_key: mention.entity_type for mention in mentions}
+
+    assert by_key["2026 04 20"] == "structure"
+    assert by_key["capítulo xl"] == "structure"
+    assert by_key["research agenda"] == "concept"
 
 
 def test_extract_concept_mentions_preserves_filename_when_distinct(tmp_path: Path) -> None:
@@ -277,6 +304,25 @@ def test_list_concepts_search_filters_by_substring(connection, fixture_vault: Pa
     assert all("north" in item["normalized_key"] or "North" in item["canonical_name"] for item in matches)
 
 
+def test_list_concepts_defaults_to_semantic_concepts(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "chapter.md").write_text(
+        "# CAPÍTULO XL\n\nBody mentions [[Project North Star]].\n\n## Research Agenda\n\nNotes.",
+        encoding="utf-8",
+    )
+    ingest_vault(connection, vault, settings)
+
+    default_items = list_concepts(connection, limit=100)
+    structure_items = list_concepts(connection, entity_type="structure", limit=100)
+    all_items = list_concepts(connection, entity_type=None, limit=100)
+
+    assert all(item["entity_type"] == "concept" for item in default_items)
+    assert "capítulo xl" not in {item["normalized_key"] for item in default_items}
+    assert "capítulo xl" in {item["normalized_key"] for item in structure_items}
+    assert "capítulo xl" in {item["normalized_key"] for item in all_items}
+
+
 def test_get_concept_detail_returns_chunk_provenance(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     concept = find_concept(connection, name="Project North Star")
@@ -357,6 +403,17 @@ def test_find_concepts_for_terms_returns_aliased_entities(connection, fixture_va
     assert "project north star" in keys
     # "project" and "project north star" both exist; tokens individually match the tag concept "project".
     assert "project" in keys
+
+
+def test_find_concepts_for_terms_ignores_structures(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "chapter.md").write_text("# CAPÍTULO XL\n\nBody.", encoding="utf-8")
+    ingest_vault(connection, vault, settings)
+
+    matches = find_concepts_for_terms(connection, ["capítulo", "xl"])
+
+    assert matches == []
 
 
 def test_chunks_with_concepts_filters_to_known_chunks(connection, fixture_vault: Path, settings: Settings) -> None:

@@ -30,16 +30,21 @@ def list_concepts(
     connection: sqlite3.Connection,
     *,
     search: str | None = None,
+    entity_type: str | None = "concept",
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, object]]:
-    where = ""
+    where_parts: list[str] = []
     params: list[object] = []
+    if entity_type:
+        where_parts.append("e.entity_type = ?")
+        params.append(entity_type)
     if search:
-        where = "WHERE e.normalized_key LIKE ? OR e.canonical_name LIKE ?"
+        where_parts.append("(e.normalized_key LIKE ? OR e.canonical_name LIKE ?)")
         token = f"%{normalize_key(search)}%"
         params.extend([token, f"%{search}%"])
     params.extend([int(limit), int(offset)])
+    where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = connection.execute(
         f"""
         SELECT
@@ -202,8 +207,11 @@ def find_concepts_for_terms(
         SELECT DISTINCT e.id, e.canonical_name, e.normalized_key, e.entity_type, e.mention_count, em.mention_text
         FROM entities e
         LEFT JOIN entity_mentions em ON em.entity_id = e.id AND em.extraction_method = 'alias'
-        WHERE e.normalized_key IN ({placeholders})
-           OR lower(replace(replace(em.mention_text, '_', ' '), '-', ' ')) IN ({placeholders})
+        WHERE e.entity_type = 'concept'
+          AND (
+              e.normalized_key IN ({placeholders})
+              OR lower(replace(replace(em.mention_text, '_', ' '), '-', ' ')) IN ({placeholders})
+          )
         """,
         (*keys, *keys),
     ).fetchall()

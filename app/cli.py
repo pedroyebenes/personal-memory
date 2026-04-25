@@ -60,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--limit", type=int, default=50)
     list_parser.add_argument("--offset", type=int, default=0)
     list_parser.add_argument("--search", default=None)
+    list_parser.add_argument("--type", choices=("concept", "structure", "all"), default="concept")
 
     show_parser = concepts_sub.add_parser("show")
     show_group = show_parser.add_mutually_exclusive_group(required=True)
@@ -175,7 +176,14 @@ def main() -> None:
 
     if args.command == "concepts":
         if args.concepts_command == "list":
-            concepts = list_concepts(connection, search=args.search, limit=args.limit, offset=args.offset)
+            entity_type = None if args.type == "all" else args.type
+            concepts = list_concepts(
+                connection,
+                search=args.search,
+                entity_type=entity_type,
+                limit=args.limit,
+                offset=args.offset,
+            )
             print(json.dumps({"concepts": concepts, "count": len(concepts)}, indent=2))
             return
         if args.concepts_command == "show":
