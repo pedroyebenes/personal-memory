@@ -9,6 +9,10 @@ Local-first personal memory system for a single Obsidian vault.
 - Heading-aware chunking
 - Local embeddings with sentence-transformers
 - Keyword, semantic, and hybrid retrieval
+- Metadata/rerank/concept-aware scoring diagnostics
+- Deterministic concept extraction with structure/concept separation
+- Concept inspection with chunk-level provenance
+- Retrieval evaluation against local golden questions
 - Evidence-backed `ask` output with source provenance
 - Local web chatbot backed by the same retrieval pipeline
 
@@ -23,6 +27,8 @@ personal-memory init-db
 personal-memory ingest
 personal-memory search --query "topic"
 personal-memory ask --query "What do my notes say about topic?"
+personal-memory concepts list
+personal-memory eval retrieval
 personal-memory web
 ```
 
@@ -226,6 +232,50 @@ personal-memory search --query "what did I write about local models?" --rewrite-
 personal-memory ask --query "what did I write about local models?" --rewrite-query --use-llm
 ```
 
+## Concepts and Structures
+
+Concept extraction is deterministic and local. Refresh/reindex populates concepts from titles, filenames, headings, tags, aliases, wikilinks, inline tags, emphasis markers, definitions, and repeated body phrases.
+
+Semantic concepts are separate from structural labels such as `CAPÍTULO XL` or date-like note titles:
+
+```bash
+personal-memory concepts list
+personal-memory concepts list --type structure
+personal-memory concepts list --method alias
+personal-memory concepts list --quality strong
+personal-memory concepts show --name "Project North Star"
+personal-memory concepts noise-report
+personal-memory concepts refresh
+```
+
+Concept details include exact mention provenance, top supporting chunks, related documents, and copyable Markdown source references.
+
+## Retrieval Quality Checks
+
+You can keep a local JSON file of vault-specific retrieval checks and run it without any cloud service:
+
+```json
+{
+  "cases": [
+    {
+      "id": "north-star",
+      "query": "North Star launch",
+      "expected_paths": ["project-note.md"],
+      "expected_terms": ["launch"]
+    }
+  ]
+}
+```
+
+Run:
+
+```bash
+personal-memory eval retrieval --cases retrieval_eval.json
+personal-memory eval retrieval --cases retrieval_eval.json --concept-boost --rerank
+```
+
+Search and ask results include score explanations, matched concepts, and copyable source references so ranking behavior can be inspected locally.
+
 Provider-specific configuration:
 
 ```bash
@@ -258,6 +308,7 @@ The web UI is a thin local wrapper around the existing backend. It exposes:
 - `GET /` for the browser chat page
 - `GET /api/status` for index stats
 - `GET /api/search?query=...` for hybrid search
+- `GET /api/concepts?...` for concept listing and filtering
 - `POST /api/refresh` for incremental index refresh
 - `POST /api/chat` for evidence-backed answers
 

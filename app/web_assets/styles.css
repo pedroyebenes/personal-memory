@@ -460,13 +460,21 @@
         gap: 10px;
       }
 
-      .inline-form input {
+      .inline-form input,
+      .inline-form textarea {
         width: 100%;
         border-radius: 14px;
         border: 1px solid var(--border);
         padding: 12px 14px;
         font: inherit;
         background: rgba(255, 255, 255, 0.82);
+      }
+
+      .inline-form textarea.small-textarea {
+        min-height: 220px;
+        font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+        font-size: 0.82rem;
+        line-height: 1.45;
       }
 
       .control-body input,
@@ -593,6 +601,52 @@
       .warning-box {
         display: grid;
         gap: 8px;
+      }
+
+      .concept-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      button.concept-chip {
+        min-height: 30px;
+        padding: 5px 9px;
+        border: 1px solid rgba(15, 118, 110, 0.24);
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.1);
+        color: #0f5c56;
+        font-size: 0.8rem;
+      }
+
+      .tiny-meta {
+        display: inline-flex;
+        margin: 0 6px 6px 0;
+        padding: 4px 7px;
+        border-radius: 999px;
+        background: rgba(30, 42, 34, 0.06);
+        border: 1px solid var(--border);
+        color: var(--accent-3);
+        font-size: 0.78rem;
+      }
+
+      .concept-detail {
+        display: grid;
+        gap: 12px;
+      }
+
+      .eval-summary {
+        font-weight: 700;
+      }
+
+      .eval-case.passed {
+        border-color: rgba(15, 118, 110, 0.28);
+      }
+
+      .eval-case.failed {
+        border-color: rgba(180, 83, 9, 0.36);
+        background: rgba(217, 119, 6, 0.08);
       }
 
       .warning-item {

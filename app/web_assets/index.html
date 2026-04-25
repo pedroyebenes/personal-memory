@@ -35,6 +35,8 @@
           <div class="rail-tabs" role="tablist" aria-label="Workspace navigation">
             <button id="answers-tab" class="rail-tab active" type="button" data-rail-tab="answers">Answers</button>
             <button id="search-tab" class="rail-tab" type="button" data-rail-tab="search">Search</button>
+            <button id="concepts-tab" class="rail-tab" type="button" data-rail-tab="concepts">Concepts</button>
+            <button id="eval-tab" class="rail-tab" type="button" data-rail-tab="eval">Eval</button>
           </div>
           <section id="answers-pane" class="rail-pane active">
             <nav id="answer-tabs" class="answer-tabs" aria-label="Answers"></nav>
@@ -57,6 +59,40 @@
               <h2>Recent Queries</h2>
               <div id="recent-queries" class="sources empty">No recent queries yet.</div>
             </section>
+          </section>
+          <section id="concepts-pane" class="rail-pane">
+            <form id="concepts-form" class="inline-form">
+              <input id="concept-search" type="text" placeholder="Filter concepts">
+              <select id="concept-type">
+                <option value="concept">Concepts</option>
+                <option value="structure">Structures</option>
+                <option value="all">All</option>
+              </select>
+              <select id="concept-quality">
+                <option value="">Any quality</option>
+                <option value="strong">Strong</option>
+                <option value="medium">Medium</option>
+                <option value="weak">Weak</option>
+              </select>
+              <input id="concept-method" type="text" placeholder="method: alias, tag, body_phrase">
+              <button class="secondary" id="concepts-button" type="submit">List</button>
+            </form>
+            <div id="concept-results" class="sources empty">No concepts loaded yet.</div>
+          </section>
+          <section id="eval-pane" class="rail-pane">
+            <form id="eval-form" class="inline-form">
+              <textarea id="eval-cases" class="small-textarea" spellcheck="false"></textarea>
+              <label>
+                <input id="eval-concept-boost" type="checkbox">
+                Use concept boost
+              </label>
+              <label>
+                <input id="eval-rerank" type="checkbox">
+                Use rerank
+              </label>
+              <button class="secondary" id="eval-button" type="submit">Run Checks</button>
+            </form>
+            <div id="eval-results" class="sources empty">No retrieval checks have run.</div>
           </section>
         </aside>
 
@@ -93,6 +129,10 @@
                     <label>
                       <input id="rerank-results" type="checkbox">
                       Rerank retrieved evidence
+                    </label>
+                    <label>
+                      <input id="concept-boost-results" type="checkbox">
+                      Boost concept matches
                     </label>
                     <label class="field">
                       <span>Sources</span>

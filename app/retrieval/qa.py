@@ -7,12 +7,13 @@ from app.models import SearchFilters
 from app.retrieval.llm import LLMConfigurationError, synthesize_answer
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import resolve_retrieval_query
+from app.retrieval.sources import build_markdown_ref, build_source_ref
 
 
 def _build_sources(results) -> list[dict[str, object]]:
     sources = []
     for result in results:
-        anchor = result.section_title.lower().replace(" ", "-") if result.section_title else None
+        source_ref = result.source_ref or build_source_ref(result.source_path, result.section_title)
         sources.append(
             {
                 "document_title": result.document_title,
@@ -21,13 +22,16 @@ def _build_sources(results) -> list[dict[str, object]]:
                 "chunk_index": result.chunk_index,
                 "section_title": result.section_title,
                 "snippet": result.snippet,
-                "source_ref": f"{result.source_path}#{anchor}" if anchor else result.source_path,
+                "source_ref": source_ref,
+                "markdown_ref": result.markdown_ref
+                or build_markdown_ref(result.document_title, result.source_path, result.section_title),
                 "keyword_score": result.keyword_score,
                 "semantic_score": result.semantic_score,
                 "metadata_score": result.metadata_score,
                 "rerank_score": result.rerank_score,
                 "final_score": result.final_score,
                 "score_explanation": result.score_explanation,
+                "matched_concepts": result.matched_concepts or [],
             }
         )
     return sources

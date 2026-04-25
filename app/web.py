@@ -17,7 +17,8 @@ from app.config import Settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
-from app.retrieval.concept_search import get_concept_detail, list_concepts
+from app.retrieval.concept_search import CONCEPT_QUALITIES, get_concept_detail, list_concepts
+from app.retrieval.evaluation import evaluate_retrieval_cases
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.util.timestamps import utc_now_iso
@@ -456,6 +457,7 @@ def handle_api_get(
         summary["provider_defaults"] = settings.synthesis_model_defaults()
         summary["provider_availability"] = settings.provider_availability()
         summary["enable_reranking"] = settings.enable_reranking
+        summary["enable_concept_boost"] = settings.enable_concept_boost
         summary["top_k"] = settings.top_k
         summary["config_diagnostics"] = settings.validate()
         return HTTPStatus.OK, _success_payload(summary)
@@ -474,6 +476,15 @@ def handle_api_get(
                 details={"field": "type"},
             )
         entity_type = None if entity_type_raw == "all" else entity_type_raw
+        method = query_params.get("method", [""])[0].strip() or None
+        quality = query_params.get("quality", [""])[0].strip().lower() or None
+        if quality and quality not in CONCEPT_QUALITIES:
+            raise APIError(
+                "invalid_concept_quality",
+                "quality must be one of strong, medium, weak, or all.",
+                status=HTTPStatus.BAD_REQUEST,
+                details={"field": "quality"},
+            )
         limit = _read_top_k(query_params.get("limit", ["50"])[0], 50)
         offset_raw = query_params.get("offset", ["0"])[0]
         try:
@@ -486,7 +497,15 @@ def handle_api_get(
                 details={"field": "offset"},
             ) from exc
         concepts = with_connection(
-            lambda conn: list_concepts(conn, search=search, entity_type=entity_type, limit=limit, offset=offset)
+            lambda conn: list_concepts(
+                conn,
+                search=search,
+                entity_type=entity_type,
+                method=method,
+                quality=quality,
+                limit=limit,
+                offset=offset,
+            )
         )
         return HTTPStatus.OK, _success_payload(
             {
@@ -494,6 +513,8 @@ def handle_api_get(
                 "count": len(concepts),
                 "search": search,
                 "type": entity_type_raw,
+                "method": method,
+                "quality": quality,
                 "limit": limit,
                 "offset": offset,
             }
@@ -589,6 +610,34 @@ def handle_api_post(
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/concepts/refresh":
         result = with_connection(lambda conn: refresh_concepts(conn))
+        return HTTPStatus.OK, _success_payload(result)
+    if parsed.path == "/api/eval/retrieval":
+        raw_cases = payload.get("cases", [])
+        if isinstance(raw_cases, dict):
+            raw_cases = raw_cases.get("cases", [])
+        if not isinstance(raw_cases, list):
+            raise APIError(
+                "invalid_eval_cases",
+                "cases must be a list or an object with a cases list.",
+                status=HTTPStatus.BAD_REQUEST,
+                details={"field": "cases"},
+            )
+        cases = [case for case in raw_cases if isinstance(case, dict)]
+        top_k_value = _read_top_k(payload.get("top_k"), settings.top_k)
+        use_rerank = _read_bool(payload, "rerank", settings.enable_reranking)
+        use_concept_boost = _read_bool(payload, "concept_boost", settings.enable_concept_boost)
+        result = with_connection(
+            lambda conn: evaluate_retrieval_cases(
+                conn,
+                settings,
+                cases,
+                top_k=top_k_value,
+                use_rerank=use_rerank,
+                use_concept_boost=use_concept_boost,
+            )
+        )
+        result["rerank"] = use_rerank
+        result["concept_boost"] = use_concept_boost
         return HTTPStatus.OK, _success_payload(result)
     if parsed.path != "/api/chat":
         raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)

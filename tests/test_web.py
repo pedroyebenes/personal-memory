@@ -23,8 +23,14 @@ def test_web_assets_are_split_and_linked() -> None:
     assert 'placeholder="books/ or projects/"' in html
     assert ".layout" in css
     assert "function renderAnswerWorkspaces" in js
+    assert "function loadConcepts" in js
+    assert "function renderEvalResults" in js
     assert "top_k: readTopK()" in js
     assert "vault path:" in js
+    assert 'id="concepts-tab"' in html
+    assert 'id="eval-tab"' in html
+    assert 'id="concept-boost-results"' in html
+    assert 'id="eval-cases"' in html
     assert 'id="viz-search"' in viz_html
     assert 'id="label-lines"' in viz_html
 
@@ -58,6 +64,7 @@ def test_status_reports_config_diagnostics(tmp_path: Path) -> None:
     assert int(status) == 200
     assert payload["ok"] is True
     assert payload["top_k"] == 5
+    assert payload["enable_concept_boost"] is False
     diagnostics = payload["config_diagnostics"]
     assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
 
@@ -254,6 +261,10 @@ def test_search_accepts_concept_boost_flag(connection, fixture_vault: Path, sett
     assert payload["concept_boost"] is True
     assert payload["results"]
     assert any("concept_boost" in item["score_explanation"] for item in payload["results"])
+    boosted = next(item for item in payload["results"] if item["matched_concepts"])
+    assert boosted["matched_concepts"][0]["canonical_name"]
+    assert boosted["source_ref"]
+    assert boosted["markdown_ref"]
 
 
 def test_search_filters_by_modified_date_range(connection, fixture_vault: Path, settings: Settings) -> None:
@@ -368,6 +379,28 @@ def test_chat_accepts_rerank_flag(connection, fixture_vault: Path, settings: Set
     assert any(source["rerank_score"] > 0 for source in payload["sources"])
 
 
+def test_chat_accepts_concept_boost_flag(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/chat",
+        {
+            "query": "What is North Star?",
+            "concept_boost": True,
+        },
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["concept_boost"] is True
+    assert payload["sources"]
+    assert any(source["matched_concepts"] for source in payload["sources"])
+    assert "markdown_ref" in payload["sources"][0]
+
+
 def test_concepts_api_lists_details_and_refreshes(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     with_connection = lambda callback: callback(connection)
@@ -442,6 +475,72 @@ def test_concepts_api_filters_by_entity_type(connection, tmp_path: Path, setting
     assert "capítulo xl" in {item["normalized_key"] for item in structures["concepts"]}
 
 
+def test_concepts_api_filters_by_method_and_quality(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/concepts?method=alias&quality=strong&limit=50",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["method"] == "alias"
+    assert payload["quality"] == "strong"
+    assert payload["concepts"]
+    assert all("alias" in item["extraction_methods"] for item in payload["concepts"])
+    assert all(item["quality"] == "strong" for item in payload["concepts"])
+
+
+def test_retrieval_eval_api_runs_inline_cases(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/eval/retrieval",
+        {
+            "cases": [
+                {
+                    "id": "north-star",
+                    "query": "North Star launch",
+                    "expected_paths": ["project-note.md"],
+                    "expected_terms": ["launch"],
+                }
+            ],
+            "concept_boost": True,
+        },
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["status"] == "passed"
+    assert payload["passed"] == 1
+    assert payload["concept_boost"] is True
+
+
+def test_retrieval_eval_api_rejects_invalid_cases(settings: Settings) -> None:
+    try:
+        handle_api_post(
+            "/api/eval/retrieval",
+            {"cases": "bad"},
+            settings,
+            RefreshState(),
+            lambda callback: callback,
+        )
+    except APIError as exc:
+        status = exc.status
+        payload = _error_payload(exc)
+    else:
+        raise AssertionError("Expected APIError")
+
+    assert int(status) == 400
+    assert payload["error"]["code"] == "invalid_eval_cases"
+
+
 def test_concepts_api_rejects_invalid_entity_type(settings: Settings) -> None:
     try:
         handle_api_get(
@@ -458,6 +557,24 @@ def test_concepts_api_rejects_invalid_entity_type(settings: Settings) -> None:
 
     assert int(status) == 400
     assert payload["error"]["code"] == "invalid_concept_type"
+
+
+def test_concepts_api_rejects_invalid_quality(settings: Settings) -> None:
+    try:
+        handle_api_get(
+            "/api/concepts?quality=nope",
+            settings,
+            RefreshState(),
+            lambda callback: callback,
+        )
+    except APIError as exc:
+        status = exc.status
+        payload = _error_payload(exc)
+    else:
+        raise AssertionError("Expected APIError")
+
+    assert int(status) == 400
+    assert payload["error"]["code"] == "invalid_concept_quality"
 
 
 def test_chat_treats_null_path_prefix_as_no_filter(connection, fixture_vault: Path, settings: Settings) -> None:

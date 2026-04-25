@@ -9,7 +9,14 @@ import sys
 from app.config import format_diagnostics, load_settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, reindex_vault, status_summary
-from app.retrieval.concept_search import find_concept, get_concept_detail, list_concepts
+from app.retrieval.concept_search import (
+    CONCEPT_QUALITIES,
+    concept_noise_report,
+    find_concept,
+    get_concept_detail,
+    list_concepts,
+)
+from app.retrieval.evaluation import evaluate_retrieval
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.retrieval.query_rewrite import resolve_retrieval_query
@@ -61,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--offset", type=int, default=0)
     list_parser.add_argument("--search", default=None)
     list_parser.add_argument("--type", choices=("concept", "structure", "all"), default="concept")
+    list_parser.add_argument("--method", default=None)
+    list_parser.add_argument("--quality", choices=tuple(sorted(CONCEPT_QUALITIES)), default=None)
 
     show_parser = concepts_sub.add_parser("show")
     show_group = show_parser.add_mutually_exclusive_group(required=True)
@@ -68,6 +77,16 @@ def build_parser() -> argparse.ArgumentParser:
     show_group.add_argument("--name", type=str, dest="concept_name")
 
     concepts_sub.add_parser("refresh")
+    noise_parser = concepts_sub.add_parser("noise-report")
+    noise_parser.add_argument("--limit", type=int, default=50)
+
+    eval_parser = subparsers.add_parser("eval")
+    eval_sub = eval_parser.add_subparsers(dest="eval_command", required=True)
+    retrieval_eval = eval_sub.add_parser("retrieval")
+    retrieval_eval.add_argument("--cases", default=None, help="JSON file with retrieval evaluation cases")
+    retrieval_eval.add_argument("--top-k", type=int)
+    retrieval_eval.add_argument("--rerank", action="store_true")
+    retrieval_eval.add_argument("--concept-boost", action="store_true")
     return parser
 
 
@@ -181,6 +200,8 @@ def main() -> None:
                 connection,
                 search=args.search,
                 entity_type=entity_type,
+                method=args.method,
+                quality=args.quality,
                 limit=args.limit,
                 offset=args.offset,
             )
@@ -200,7 +221,27 @@ def main() -> None:
         if args.concepts_command == "refresh":
             print(json.dumps(refresh_concepts(connection), indent=2))
             return
+        if args.concepts_command == "noise-report":
+            print(json.dumps(concept_noise_report(connection, limit=args.limit), indent=2))
+            return
         raise SystemExit(f"Unknown concepts subcommand: {args.concepts_command}")
+
+    if args.command == "eval":
+        if args.eval_command == "retrieval":
+            cases_path = Path(args.cases).expanduser().resolve() if args.cases else None
+            payload = evaluate_retrieval(
+                connection,
+                settings,
+                cases_path=cases_path,
+                top_k=args.top_k,
+                use_rerank=args.rerank or None,
+                use_concept_boost=args.concept_boost or None,
+            )
+            print(json.dumps(payload, indent=2))
+            if payload["status"] == "failed":
+                sys.exit(2)
+            return
+        raise SystemExit(f"Unknown eval subcommand: {args.eval_command}")
 
     if args.command == "web":
         connection.close()

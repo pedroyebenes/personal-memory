@@ -11,6 +11,7 @@ from app.retrieval.keyword_search import keyword_search
 from app.retrieval.rerank import rerank_results
 from app.retrieval.snippets import extract_snippet, query_terms
 from app.retrieval.semantic_search import semantic_search
+from app.retrieval.sources import build_markdown_ref, build_source_ref
 
 CONCEPT_BOOST_WEIGHT = 0.06
 
@@ -159,13 +160,15 @@ def _apply_concept_boost(
             continue
         boost = round(min(len(hit_entities) * CONCEPT_BOOST_WEIGHT, 0.18), 6)
         result.final_score += boost
-        explanation = result.score_explanation or {}
-        explanation["concept_boost"] = boost
-        explanation["concept_matches"] = [
+        concept_matches = [
             {"id": entity_id, "canonical_name": by_id[entity_id]["canonical_name"]}
             for entity_id in sorted(hit_entities)
             if entity_id in by_id
         ]
+        result.matched_concepts = concept_matches
+        explanation = result.score_explanation or {}
+        explanation["concept_boost"] = boost
+        explanation["concept_matches"] = concept_matches
         explanation["final_score"] = result.final_score
         result.score_explanation = explanation
 
@@ -220,6 +223,9 @@ def hybrid_search(
                 metadata_score=metadata_score,
                 rerank_score=0.0,
                 score_explanation=score_explanation,
+                matched_concepts=[],
+                source_ref=build_source_ref(base.source_path, base.section_title),
+                markdown_ref=build_markdown_ref(base.document_title, base.source_path, base.section_title),
             )
         )
     merged = [item for item in merged if _matches_filters(item, filters, metadata)]

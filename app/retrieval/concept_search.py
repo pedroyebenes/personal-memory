@@ -3,6 +3,19 @@ from __future__ import annotations
 import sqlite3
 
 from app.processing.concepts import normalize_key
+from app.retrieval.sources import build_markdown_ref, build_source_ref
+
+STRONG_CONCEPT_METHODS = {"wikilink", "tag", "alias", "definition", "inline_tag"}
+MEDIUM_CONCEPT_METHODS = {"title", "heading", "filename", "emphasis", "body_phrase"}
+CONCEPT_QUALITIES = {"strong", "medium", "weak", "all"}
+
+
+def concept_quality(methods: set[str], mention_count: int = 0) -> str:
+    if methods.intersection(STRONG_CONCEPT_METHODS):
+        return "strong"
+    if methods.intersection(MEDIUM_CONCEPT_METHODS):
+        return "medium"
+    return "weak" if mention_count <= 1 else "medium"
 
 
 def _row_to_concept(row: sqlite3.Row) -> dict[str, object]:
@@ -31,6 +44,8 @@ def list_concepts(
     *,
     search: str | None = None,
     entity_type: str | None = "concept",
+    method: str | None = None,
+    quality: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, object]]:
@@ -43,7 +58,18 @@ def list_concepts(
         where_parts.append("(e.normalized_key LIKE ? OR e.canonical_name LIKE ?)")
         token = f"%{normalize_key(search)}%"
         params.extend([token, f"%{search}%"])
-    params.extend([int(limit), int(offset)])
+    if method:
+        where_parts.append(
+            """
+            EXISTS (
+                SELECT 1
+                FROM entity_mentions em_filter
+                WHERE em_filter.entity_id = e.id
+                  AND em_filter.extraction_method = ?
+            )
+            """
+        )
+        params.append(method)
     where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = connection.execute(
         f"""
@@ -61,24 +87,31 @@ def list_concepts(
         {where}
         GROUP BY e.id
         ORDER BY e.mention_count DESC, e.canonical_name ASC
-        LIMIT ? OFFSET ?
         """,
         tuple(params),
     ).fetchall()
-    return [
-        {
+    items: list[dict[str, object]] = []
+    for row in rows:
+        methods = sorted({method for method in (row["methods"] or "").split(",") if method})
+        mention_count = int(row["mention_count"] or 0)
+        item_quality = concept_quality(set(methods), mention_count)
+        if quality and quality != "all" and item_quality != quality:
+            continue
+        items.append(
+            {
             "id": int(row["id"]),
             "canonical_name": row["canonical_name"],
             "normalized_key": row["normalized_key"],
             "entity_type": row["entity_type"],
-            "mention_count": int(row["mention_count"] or 0),
+            "mention_count": mention_count,
             "document_count": int(row["document_count"] or 0),
-            "extraction_methods": sorted(
-                {method for method in (row["methods"] or "").split(",") if method}
-            ),
-        }
-        for row in rows
-    ]
+            "extraction_methods": methods,
+            "quality": item_quality,
+            }
+        )
+    start = int(offset)
+    end = start + int(limit)
+    return items[start:end]
 
 
 def find_concept(
@@ -182,11 +215,50 @@ def get_concept_detail(connection: sqlite3.Connection, concept_id: int) -> dict[
         }
         for item in documents.values()
     ]
+    chunks: dict[int, dict[str, object]] = {}
+    for mention in mentions:
+        chunk_id = int(mention["chunk_id"])
+        bucket = chunks.setdefault(
+            chunk_id,
+            {
+                "chunk_id": chunk_id,
+                "chunk_index": mention["chunk_index"],
+                "section_title": mention["section_title"],
+                "chunk_snippet": mention["chunk_snippet"],
+                "document_id": mention["document_id"],
+                "document_title": mention["document_title"],
+                "source_path": mention["source_path"],
+                "mention_count": 0,
+                "extraction_methods": set(),
+            },
+        )
+        bucket["mention_count"] = int(bucket["mention_count"]) + 1
+        bucket["extraction_methods"].add(mention["extraction_method"])
+
+    top_chunks = []
+    for item in chunks.values():
+        source_path = str(item["source_path"])
+        section_title = item["section_title"]
+        top_chunks.append(
+            {
+                **item,
+                "extraction_methods": sorted(item["extraction_methods"]),
+                "source_ref": build_source_ref(source_path, str(section_title) if section_title else None),
+                "markdown_ref": build_markdown_ref(
+                    str(item["document_title"]),
+                    source_path,
+                    str(section_title) if section_title else None,
+                ),
+            }
+        )
 
     return {
         **concept,
+        "quality": concept_quality({mention["extraction_method"] for mention in mentions}, int(concept["mention_count"])),
         "mentions": mentions,
         "documents": sorted(document_summary, key=lambda item: -item["mention_count"]),
+        "related_documents": sorted(document_summary, key=lambda item: -item["mention_count"]),
+        "top_chunks": sorted(top_chunks, key=lambda item: (-int(item["mention_count"]), str(item["source_path"]))),
     }
 
 
@@ -249,3 +321,24 @@ def chunks_with_concepts(
     for row in rows:
         matches.setdefault(int(row["chunk_id"]), set()).add(int(row["entity_id"]))
     return matches
+
+
+def concept_noise_report(connection: sqlite3.Connection, *, limit: int = 50) -> dict[str, object]:
+    candidates = list_concepts(connection, entity_type="concept", quality="medium", limit=10000)
+    noisy = [
+        item
+        for item in candidates
+        if int(item["mention_count"]) <= 2
+        and not set(item["extraction_methods"]).intersection(STRONG_CONCEPT_METHODS)
+    ]
+    noisy.sort(key=lambda item: (int(item["mention_count"]), item["canonical_name"]))
+    return {
+        "count": len(noisy),
+        "concepts": noisy[:limit],
+        "criteria": {
+            "entity_type": "concept",
+            "quality": "medium",
+            "max_mention_count": 2,
+            "strong_methods_excluded": sorted(STRONG_CONCEPT_METHODS),
+        },
+    }

@@ -16,6 +16,7 @@ from app.processing.concepts import (
 )
 from app.retrieval.concept_search import (
     chunks_with_concepts,
+    concept_noise_report,
     find_concept,
     find_concepts_for_terms,
     get_concept_detail,
@@ -408,6 +409,19 @@ def test_list_concepts_returns_aggregated_metadata(connection, fixture_vault: Pa
     assert project["document_count"] >= 1
     assert "title" in project["extraction_methods"]
     assert "alias" in project["extraction_methods"]
+    assert project["quality"] == "strong"
+
+
+def test_list_concepts_filters_by_method_and_quality(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+
+    alias_items = list_concepts(connection, method="alias", limit=100)
+    strong_items = list_concepts(connection, quality="strong", limit=100)
+
+    assert alias_items
+    assert all("alias" in item["extraction_methods"] for item in alias_items)
+    assert strong_items
+    assert all(item["quality"] == "strong" for item in strong_items)
 
 
 def test_list_concepts_search_filters_by_substring(connection, fixture_vault: Path, settings: Settings) -> None:
@@ -454,6 +468,22 @@ def test_get_concept_detail_returns_chunk_provenance(connection, fixture_vault: 
         assert mention["source_path"].endswith(".md")
     assert detail["documents"]
     assert detail["documents"][0]["mention_count"] >= 1
+    assert detail["related_documents"] == detail["documents"]
+    assert detail["top_chunks"]
+    assert "source_ref" in detail["top_chunks"][0]
+    assert "markdown_ref" in detail["top_chunks"][0]
+
+
+def test_concept_noise_report_flags_one_off_medium_concepts(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "scratch.md").write_text("# Scratch Idea\n\nBody.", encoding="utf-8")
+    ingest_vault(connection, vault, settings)
+
+    report = concept_noise_report(connection, limit=10)
+
+    assert report["count"] >= 1
+    assert any(item["normalized_key"] == "scratch idea" for item in report["concepts"])
 
 
 def test_find_concept_returns_none_for_unknown(connection) -> None:

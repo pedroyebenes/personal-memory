@@ -40,6 +40,9 @@ class RetrievalResult:
     metadata_score: float = 0.0
     rerank_score: float = 0.0
     score_explanation: dict[str, object] | None = None
+    matched_concepts: list[dict[str, object]] | None = None
+    source_ref: str | None = None
+    markdown_ref: str | None = None
 
 
 @dataclass(slots=True)

@@ -162,6 +162,26 @@ def test_concepts_list_and_refresh_commands(
     listed = json.loads(capsys.readouterr().out)
     assert any(item["normalized_key"] == "project north star" for item in listed["concepts"])
 
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "personal-memory",
+            "--config",
+            str(config_path),
+            "concepts",
+            "list",
+            "--method",
+            "alias",
+            "--quality",
+            "strong",
+        ],
+    )
+    main()
+    filtered = json.loads(capsys.readouterr().out)
+    assert filtered["concepts"]
+    assert all("alias" in item["extraction_methods"] for item in filtered["concepts"])
+
     connection.execute("DELETE FROM entity_mentions")
     connection.execute("DELETE FROM entities")
     connection.commit()
@@ -208,6 +228,96 @@ def test_concepts_list_command_can_show_structures(
 
     payload = json.loads(capsys.readouterr().out)
     assert any(item["normalized_key"] == "capítulo xl" for item in payload["concepts"])
+
+
+def test_concepts_noise_report_command(
+    connection,
+    tmp_path: Path,
+    settings: Settings,
+    monkeypatch,
+    capsys,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "scratch.md").write_text("# Scratch Idea\n\nBody.", encoding="utf-8")
+    ingest_vault(connection, vault, settings)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "DATABASE_PATH": str(settings.database_path),
+                "EMBEDDING_MODEL_NAME": settings.embedding_model_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["personal-memory", "--config", str(config_path), "concepts", "noise-report"],
+    )
+
+    main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["count"] >= 1
+    assert any(item["normalized_key"] == "scratch idea" for item in payload["concepts"])
+
+
+def test_eval_retrieval_command_with_cases(
+    connection,
+    fixture_vault: Path,
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "north-star",
+                        "query": "North Star launch",
+                        "expected_paths": ["project-note.md"],
+                        "expected_terms": ["launch"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "DATABASE_PATH": str(settings.database_path),
+                "EMBEDDING_MODEL_NAME": settings.embedding_model_name,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "personal-memory",
+            "--config",
+            str(config_path),
+            "eval",
+            "retrieval",
+            "--cases",
+            str(cases_path),
+        ],
+    )
+
+    main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "passed"
+    assert payload["passed"] == 1
 
 
 def test_ingest_isolates_per_file_failures(connection, fixture_vault: Path, settings: Settings, monkeypatch) -> None:
