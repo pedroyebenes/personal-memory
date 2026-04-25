@@ -74,3 +74,26 @@ def test_hybrid_search_snippet_centers_matched_evidence(connection, tmp_path, se
     assert results
     assert "Needle evidence" in results[0].snippet
     assert "filler0" not in results[0].snippet
+
+
+def test_hybrid_search_optional_reranking_adds_debug_score(connection, fixture_vault, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+
+    results = hybrid_search(connection, "North Star", settings, top_k=3, use_rerank=True)
+
+    assert results
+    assert any(result.rerank_score > 0 for result in results)
+    reranked = next(result for result in results if result.rerank_score > 0)
+    assert reranked.score_explanation is not None
+    assert reranked.score_explanation["rerank_score"] == reranked.rerank_score
+    assert "rerank_factors" in reranked.score_explanation
+
+
+def test_hybrid_search_reranking_can_be_enabled_from_settings(connection, fixture_vault, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    settings.enable_reranking = True
+
+    results = hybrid_search(connection, "North Star", settings, top_k=3)
+
+    assert results
+    assert any(result.rerank_score > 0 for result in results)

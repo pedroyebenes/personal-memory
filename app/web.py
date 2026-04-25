@@ -467,6 +467,10 @@ HTML_PAGE = """<!doctype html>
                 <input id="rewrite-query" type="checkbox">
                 Rewrite natural-language query before retrieval
               </label>
+              <label>
+                <input id="rerank-results" type="checkbox">
+                Rerank retrieved evidence
+              </label>
             </div>
           </form>
           <section class="filter-panel" aria-label="Search filters">
@@ -582,6 +586,7 @@ HTML_PAGE = """<!doctype html>
       const savedSearches = document.getElementById("saved-searches");
       const useLlmInput = document.getElementById("use-llm");
       const rewriteQueryInput = document.getElementById("rewrite-query");
+      const rerankResultsInput = document.getElementById("rerank-results");
       const providerSelect = document.getElementById("llm-provider");
       const synthesisModelInput = document.getElementById("synthesis-model");
       const providerStatus = document.getElementById("provider-status");
@@ -818,6 +823,7 @@ HTML_PAGE = """<!doctype html>
           stats.appendChild(row);
         }
         refreshButton.disabled = !payload.refresh_available || Boolean(refreshState.in_progress);
+        rerankResultsInput.checked = Boolean(payload.enable_reranking);
         syncProviderOptions(payload.llm_provider || "ollama");
         const diagnosticWarnings = (payload.config_diagnostics || []).map((item) => item.message);
         if (refreshState.last_result?.status === "failed" && refreshState.last_result?.error) {
@@ -905,7 +911,8 @@ HTML_PAGE = """<!doctype html>
           meta.className = "source-meta";
           const score = typeof item.final_score === "number" ? `\nFinal score: ${item.final_score.toFixed(3)}` : "";
           const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
-          meta.textContent = `${item.source_ref || item.source_path}${score}${metadata}`;
+          const rerank = typeof item.rerank_score === "number" && item.rerank_score > 0 ? ` · rerank: ${item.rerank_score.toFixed(3)}` : "";
+          meta.textContent = `${item.source_ref || item.source_path}${score}${metadata}${rerank}`;
           const actions = document.createElement("div");
           actions.className = "action-row";
           const button = document.createElement("button");
@@ -952,7 +959,8 @@ HTML_PAGE = """<!doctype html>
           const meta = document.createElement("div");
           meta.className = "search-meta";
           const metadata = typeof item.metadata_score === "number" ? ` · metadata: ${item.metadata_score.toFixed(3)}` : "";
-          meta.textContent = `Final score: ${item.final_score.toFixed(3)}${metadata}`;
+          const rerank = typeof item.rerank_score === "number" && item.rerank_score > 0 ? ` · rerank: ${item.rerank_score.toFixed(3)}` : "";
+          meta.textContent = `Final score: ${item.final_score.toFixed(3)}${metadata}${rerank}`;
           const actions = document.createElement("div");
           actions.className = "action-row";
           const button = document.createElement("button");
@@ -1067,6 +1075,7 @@ HTML_PAGE = """<!doctype html>
               query,
               use_llm: useLlmInput.checked,
               rewrite_query: rewriteQueryInput.checked,
+              rerank: rerankResultsInput.checked,
               provider: providerSelect.value,
               model: synthesisModelInput.value.trim(),
               filters,
@@ -1106,6 +1115,7 @@ HTML_PAGE = """<!doctype html>
         try {
           const params = new URLSearchParams({ query });
           appendFiltersToParams(params);
+          if (rerankResultsInput.checked) params.set("rerank", "true");
           const response = await fetch(`/api/search?${params.toString()}`);
           const payload = await response.json();
           if (!response.ok) {
@@ -1237,6 +1247,13 @@ def _read_bool(payload: dict[str, Any], key: str, default: bool) -> bool:
         status=HTTPStatus.BAD_REQUEST,
         details={"field": key},
     )
+
+
+def _read_bool_query(query: dict[str, list[str]], key: str, default: bool) -> bool:
+    values = query.get(key)
+    if not values:
+        return default
+    return _read_bool({key: values[0]}, key, default)
 
 
 def _read_top_k(value: object, default: int) -> int:
@@ -1416,18 +1433,23 @@ def handle_api_get(
         summary["llm_provider"] = settings.llm_provider
         summary["provider_defaults"] = settings.synthesis_model_defaults()
         summary["provider_availability"] = settings.provider_availability()
+        summary["enable_reranking"] = settings.enable_reranking
         summary["config_diagnostics"] = settings.validate()
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/search":
-        query = parse_qs(parsed.query).get("query", [""])[0].strip()
-        top_k = _read_top_k(parse_qs(parsed.query).get("top_k", [settings.top_k])[0], settings.top_k)
+        query_params = parse_qs(parsed.query)
+        query = query_params.get("query", [""])[0].strip()
+        top_k = _read_top_k(query_params.get("top_k", [settings.top_k])[0], settings.top_k)
+        use_rerank = _read_bool_query(query_params, "rerank", settings.enable_reranking)
         filters = _read_filters_from_query(path)
         if not query:
             return HTTPStatus.OK, _success_payload({"results": []})
         results = with_connection(
-            lambda conn: [asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k, filters=filters)]
+            lambda conn: [
+                asdict(item) for item in hybrid_search(conn, query, settings, top_k=top_k, filters=filters, use_rerank=use_rerank)
+            ]
         )
-        return HTTPStatus.OK, _success_payload({"results": results, "filters": _serialize_filters(filters)})
+        return HTTPStatus.OK, _success_payload({"results": results, "filters": _serialize_filters(filters), "rerank": use_rerank})
     raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)
 
 
@@ -1476,6 +1498,7 @@ def handle_api_post(
     model = str(payload.get("model", "")).strip() or None
     use_llm = _read_bool(payload, "use_llm", settings.enable_llm_synthesis)
     use_query_rewrite = _read_bool(payload, "rewrite_query", settings.enable_query_rewrite)
+    use_rerank = _read_bool(payload, "rerank", settings.enable_reranking)
     filters = _read_filters(payload)
 
     request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
@@ -1489,10 +1512,12 @@ def handle_api_post(
             top_k=top_k_value,
             use_llm=use_llm,
             use_query_rewrite=use_query_rewrite,
+            use_rerank=use_rerank,
             filters=filters,
         )
     )
     response["filters"] = _serialize_filters(filters)
+    response["rerank"] = use_rerank
     return HTTPStatus.OK, _success_payload(response)
 
 

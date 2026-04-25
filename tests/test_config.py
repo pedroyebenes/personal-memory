@@ -47,6 +47,16 @@ def test_environment_variables_override_json_config(tmp_path: Path, monkeypatch)
     assert settings.llm_provider == "openai"
 
 
+def test_load_settings_reads_reranking_flag(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"ENABLE_RERANKING": false}', encoding="utf-8")
+    monkeypatch.setenv("ENABLE_RERANKING", "true")
+
+    settings = load_settings(str(config_path))
+
+    assert settings.enable_reranking is True
+
+
 def test_load_settings_reads_nvidia_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(

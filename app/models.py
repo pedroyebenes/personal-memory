@@ -38,6 +38,7 @@ class RetrievalResult:
     semantic_score: float | None
     final_score: float
     metadata_score: float = 0.0
+    rerank_score: float = 0.0
     score_explanation: dict[str, object] | None = None
 
 

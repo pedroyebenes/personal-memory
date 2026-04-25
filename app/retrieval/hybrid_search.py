@@ -7,6 +7,7 @@ import sqlite3
 from app.config import Settings
 from app.models import RetrievalResult, SearchFilters
 from app.retrieval.keyword_search import keyword_search
+from app.retrieval.rerank import rerank_results
 from app.retrieval.snippets import extract_snippet, query_terms
 from app.retrieval.semantic_search import semantic_search
 
@@ -127,6 +128,8 @@ def _metadata_score(
         "semantic_score": result.semantic_score,
         "metadata_score": metadata_score,
         "metadata_factors": factors,
+        "rerank_score": 0.0,
+        "rerank_factors": {},
     }
     return metadata_score, explanation
 
@@ -139,8 +142,10 @@ def hybrid_search(
     semantic_weight: float = 0.7,
     keyword_weight: float = 0.3,
     filters: SearchFilters | None = None,
+    use_rerank: bool | None = None,
 ) -> list[RetrievalResult]:
     filters = _normalize_filters(filters)
+    should_rerank = settings.enable_reranking if use_rerank is None else use_rerank
     terms = query_terms(query)
     keyword_results = {result.chunk_id: result for result in keyword_search(connection, query, top_k=top_k * 2)}
     semantic_results = {result.chunk_id: result for result in semantic_search(connection, query, settings, top_k=top_k * 2)}
@@ -173,9 +178,13 @@ def hybrid_search(
                 semantic_score=semantic_score,
                 final_score=final_score,
                 metadata_score=metadata_score,
+                rerank_score=0.0,
                 score_explanation=score_explanation,
             )
         )
     merged = [item for item in merged if _matches_filters(item, filters, metadata)]
     merged.sort(key=lambda item: item.final_score, reverse=True)
+    if should_rerank:
+        chunk_texts = {chunk_id: str(item.get("text") or "") for chunk_id, item in metadata.items()}
+        merged = rerank_results(merged, query, chunk_texts)
     return merged[:top_k]

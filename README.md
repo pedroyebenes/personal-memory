@@ -40,6 +40,7 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "TOP_K": 5,
   "ENABLE_LLM_SYNTHESIS": false,
   "ENABLE_QUERY_REWRITE": false,
+  "ENABLE_RERANKING": false,
   "LLM_PROVIDER": "ollama",
   "SYNTHESIS_MODEL_NAME": null,
   "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
@@ -72,6 +73,7 @@ You can still override any value with environment variables when needed:
 - `TOP_K`
 - `ENABLE_LLM_SYNTHESIS`
 - `ENABLE_QUERY_REWRITE`
+- `ENABLE_RERANKING`
 - `LLM_PROVIDER`
 - `SYNTHESIS_MODEL_NAME`
 - `OPENAI_SYNTHESIS_MODEL_NAME`
@@ -86,7 +88,7 @@ You can still override any value with environment variables when needed:
 - `NVIDIA_BASE_URL`
 - `OLLAMA_BASE_URL`
 
-Defaults keep the system local-only. LLM synthesis is disabled in V1.
+Defaults keep the system local-only. LLM synthesis and reranking are disabled unless explicitly enabled.
 
 ## Docker Compose
 

@@ -172,6 +172,23 @@ def test_search_accepts_metadata_filters(connection, fixture_vault: Path, settin
     assert all("project-note.md" in item["source_path"] for item in payload["results"])
 
 
+def test_search_accepts_rerank_flag(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/search?query=North%20Star&rerank=true",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["rerank"] is True
+    assert payload["results"]
+    assert any(item["rerank_score"] > 0 for item in payload["results"])
+
+
 def test_search_filters_by_modified_date_range(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     connection.execute(
@@ -236,6 +253,27 @@ def test_chat_response_includes_provider_model_and_filters(connection, fixture_v
     assert payload["filters"]["date_from"] == "2000-01-01T00:00:00+00:00"
     assert payload["sources"]
     assert "source_ref" in payload["sources"][0]
+
+
+def test_chat_accepts_rerank_flag(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/chat",
+        {
+            "query": "What is North Star?",
+            "rerank": True,
+        },
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["rerank"] is True
+    assert payload["sources"]
+    assert any(source["rerank_score"] > 0 for source in payload["sources"])
 
 
 def test_chat_treats_null_path_prefix_as_no_filter(connection, fixture_vault: Path, settings: Settings) -> None:

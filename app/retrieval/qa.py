@@ -25,6 +25,7 @@ def _build_sources(results) -> list[dict[str, object]]:
                 "keyword_score": result.keyword_score,
                 "semantic_score": result.semantic_score,
                 "metadata_score": result.metadata_score,
+                "rerank_score": result.rerank_score,
                 "final_score": result.final_score,
                 "score_explanation": result.score_explanation,
             }
@@ -55,9 +56,10 @@ def answer_question(
     use_llm: bool | None = None,
     use_query_rewrite: bool | None = None,
     filters: SearchFilters | None = None,
+    use_rerank: bool | None = None,
 ) -> dict[str, object]:
     retrieval_query, warnings = resolve_retrieval_query(query, settings, use_query_rewrite=use_query_rewrite)
-    results = hybrid_search(connection, retrieval_query, settings, top_k=top_k, filters=filters)
+    results = hybrid_search(connection, retrieval_query, settings, top_k=top_k, filters=filters, use_rerank=use_rerank)
     if not results:
         return {
             "question": query,

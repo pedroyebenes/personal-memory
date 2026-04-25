@@ -33,12 +33,14 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--query", required=True)
     search_parser.add_argument("--top-k", type=int)
     search_parser.add_argument("--rewrite-query", action="store_true")
+    search_parser.add_argument("--rerank", action="store_true")
 
     ask_parser = subparsers.add_parser("ask")
     ask_parser.add_argument("--query", required=True)
     ask_parser.add_argument("--top-k", type=int)
     ask_parser.add_argument("--use-llm", action="store_true")
     ask_parser.add_argument("--rewrite-query", action="store_true")
+    ask_parser.add_argument("--rerank", action="store_true")
 
     web_parser = subparsers.add_parser("web")
     web_parser.add_argument("--host", default="0.0.0.0")
@@ -99,7 +101,13 @@ def main() -> None:
             settings,
             use_query_rewrite=args.rewrite_query or None,
         )
-        results = hybrid_search(connection, retrieval_query, settings, top_k=args.top_k or settings.top_k)
+        results = hybrid_search(
+            connection,
+            retrieval_query,
+            settings,
+            top_k=args.top_k or settings.top_k,
+            use_rerank=args.rerank or None,
+        )
         print(
             json.dumps(
                 {
@@ -121,6 +129,7 @@ def main() -> None:
             top_k=args.top_k or settings.top_k,
             use_llm=args.use_llm or None,
             use_query_rewrite=args.rewrite_query or None,
+            use_rerank=args.rerank or None,
         )
         print(json.dumps(response, indent=2))
         return

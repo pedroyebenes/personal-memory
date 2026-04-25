@@ -5,6 +5,10 @@ import re
 from app.models import ChunkRecord
 
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$", re.MULTILINE)
+FENCE_PATTERN = re.compile(r"^\s*(```|~~~)")
+LIST_PATTERN = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+CALLOUT_PATTERN = re.compile(r"^\s*>\s*(?:\[[!A-Za-z]+[^\]]*\])?")
+TABLE_PATTERN = re.compile(r"^\s*\|.*\|\s*$")
 
 
 def _estimate_tokens(text: str) -> int:
@@ -15,8 +19,70 @@ def _word_count(text: str) -> int:
     return len(text.split())
 
 
-def _split_paragraphs(text: str) -> list[str]:
-    return [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+def _block_kind(line: str) -> str:
+    if FENCE_PATTERN.match(line):
+        return "fence"
+    if LIST_PATTERN.match(line):
+        return "list"
+    if CALLOUT_PATTERN.match(line):
+        return "callout"
+    if TABLE_PATTERN.match(line):
+        return "table"
+    return "paragraph"
+
+
+def _split_markdown_blocks(text: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    current_kind: str | None = None
+    in_fence = False
+    fence_marker = ""
+
+    def flush() -> None:
+        nonlocal current, current_kind
+        block = "\n".join(current).strip()
+        if block:
+            blocks.append(block)
+        current = []
+        current_kind = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if in_fence:
+            current.append(line)
+            if stripped.startswith(fence_marker):
+                in_fence = False
+                flush()
+            continue
+
+        fence_match = FENCE_PATTERN.match(line)
+        if fence_match:
+            if current:
+                flush()
+            current = [line]
+            current_kind = "fence"
+            in_fence = True
+            fence_marker = fence_match.group(1)
+            continue
+
+        if not stripped:
+            if current_kind in {"list", "callout", "table"}:
+                current.append(line)
+            else:
+                flush()
+            continue
+
+        kind = _block_kind(line)
+        if current and current_kind != kind:
+            flush()
+        current.append(line)
+        current_kind = kind
+
+    if current:
+        flush()
+    return blocks
 
 
 def _build_sections(text: str) -> list[tuple[str | None, str, int]]:
@@ -47,8 +113,8 @@ def _split_large_section(
     max_words: int,
     overlap_paragraphs: int,
 ) -> list[ChunkRecord]:
-    paragraphs = _split_paragraphs(text)
-    if not paragraphs:
+    blocks = _split_markdown_blocks(text)
+    if not blocks:
         return []
 
     chunks: list[ChunkRecord] = []
@@ -57,9 +123,39 @@ def _split_large_section(
     chunk_start = start_offset
     running_offset = start_offset
 
-    for paragraph in paragraphs:
-        paragraph_words = len(paragraph.split())
-        if current and current_words + paragraph_words > max_words:
+    for block in blocks:
+        block_words = len(block.split())
+        if block_words > max_words:
+            if current:
+                chunk_text = "\n\n".join(current).strip()
+                chunks.append(
+                    ChunkRecord(
+                        chunk_index=0,
+                        section_title=section_title,
+                        text=chunk_text,
+                        token_estimate=_estimate_tokens(chunk_text),
+                        char_start=chunk_start,
+                        char_end=chunk_start + len(chunk_text),
+                    )
+                )
+                current = []
+                current_words = 0
+                chunk_start = running_offset
+            chunks.append(
+                ChunkRecord(
+                    chunk_index=0,
+                    section_title=section_title,
+                    text=block,
+                    token_estimate=_estimate_tokens(block),
+                    char_start=running_offset,
+                    char_end=running_offset + len(block),
+                )
+            )
+            running_offset += len(block) + 2
+            chunk_start = running_offset
+            continue
+
+        if current and current_words + block_words > max_words:
             chunk_text = "\n\n".join(current).strip()
             chunks.append(
                 ChunkRecord(
@@ -76,9 +172,9 @@ def _split_large_section(
             current_words = sum(len(item.split()) for item in current)
             chunk_start = running_offset - len("\n\n".join(overlap)) if overlap else running_offset
 
-        current.append(paragraph)
-        current_words += paragraph_words
-        running_offset += len(paragraph) + 2
+        current.append(block)
+        current_words += block_words
+        running_offset += len(block) + 2
 
     if current:
         chunk_text = "\n\n".join(current).strip()
