@@ -7,7 +7,19 @@ from app.config import Settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault
 from app import web
-from app.web import APIError, RefreshState, _error_payload, handle_api_get, handle_api_post
+from app.web import APIError, RefreshState, _error_payload, _read_web_asset, handle_api_get, handle_api_post
+
+
+def test_web_assets_are_split_and_linked() -> None:
+    html = _read_web_asset("index.html")
+    css = _read_web_asset("styles.css")
+    js = _read_web_asset("app.js")
+
+    assert '<link rel="stylesheet" href="/static/styles.css">' in html
+    assert '<script src="/static/app.js"></script>' in html
+    assert "HTML_PAGE" not in html
+    assert ".layout" in css
+    assert "function renderAnswerWorkspaces" in js
 
 
 def test_status_reports_config_diagnostics(tmp_path: Path) -> None:

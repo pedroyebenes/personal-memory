@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Personal Memory Chat</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="header-main">
+          <div>
+            <div class="eyebrow">Local-first Memory</div>
+            <h1>Chat With Your Vault</h1>
+            <div class="subhead">
+              Questions are answered with evidence-backed snippets and explicit source provenance from your local SQLite index.
+            </div>
+          </div>
+          <form id="refresh-form">
+            <button class="secondary" id="refresh-button" type="submit">Refresh Index</button>
+          </form>
+        </div>
+        <div class="status-bar">
+          <div id="stats" class="status-items empty">Loading status...</div>
+          <div id="warnings" class="warning-box empty">No warnings.</div>
+        </div>
+      </header>
+
+      <section class="layout">
+        <aside class="panel left-rail">
+          <div class="rail-tabs" role="tablist" aria-label="Workspace navigation">
+            <button id="answers-tab" class="rail-tab active" type="button" data-rail-tab="answers">Answers</button>
+            <button id="search-tab" class="rail-tab" type="button" data-rail-tab="search">Search</button>
+          </div>
+          <section id="answers-pane" class="rail-pane active">
+            <nav id="answer-tabs" class="answer-tabs" aria-label="Answers"></nav>
+          </section>
+          <section id="search-pane" class="rail-pane">
+            <form id="search-form" class="inline-form">
+              <input id="search-query" type="text" placeholder="Keyword or concept">
+              <button class="secondary" id="search-button" type="submit">Search</button>
+            </form>
+            <div id="search-results" class="search-results empty">No search results yet.</div>
+            <section class="card">
+              <h2>Saved Searches</h2>
+              <form id="saved-search-form" class="inline-form">
+                <input id="saved-search-name" type="text" placeholder="Save current query as">
+                <button class="secondary" id="save-search-button" type="submit">Save Search</button>
+              </form>
+              <div id="saved-searches" class="sources empty">No saved searches yet.</div>
+            </section>
+            <section class="card">
+              <h2>Recent Queries</h2>
+              <div id="recent-queries" class="sources empty">No recent queries yet.</div>
+            </section>
+          </section>
+        </aside>
+
+        <div class="panel chat-panel">
+          <form id="chat-form" class="composer">
+            <textarea id="query" placeholder="What do my notes say about retrieval, a project, or a person?"></textarea>
+            <button id="send-button" type="submit">Ask</button>
+          </form>
+          <div class="control-grid">
+            <details class="control-panel">
+              <summary>Settings</summary>
+              <form id="llm-form" class="control-body">
+                <div class="settings-grid">
+                  <div class="control-group">
+                    <div class="control-group-title">Model & Retrieval</div>
+                    <div class="provider-row">
+                      <select id="llm-provider">
+                        <option value="ollama">Ollama</option>
+                        <option value="gemini">Gemini</option>
+                        <option value="nvidia">NVIDIA</option>
+                        <option value="openai">OpenAI</option>
+                      </select>
+                      <input id="synthesis-model" type="text" placeholder="Model name">
+                    </div>
+                    <div id="provider-status" class="provider-status">Checking provider availability...</div>
+                    <label>
+                      <input id="use-llm" type="checkbox">
+                      Use LLM synthesis for answers
+                    </label>
+                    <label>
+                      <input id="rewrite-query" type="checkbox">
+                      Rewrite query before retrieval
+                    </label>
+                    <label>
+                      <input id="rerank-results" type="checkbox">
+                      Rerank retrieved evidence
+                    </label>
+                  </div>
+                  <div class="control-group">
+                    <div class="control-group-title">Filters</div>
+                    <section class="filter-panel" aria-label="Search filters">
+                      <div class="filter-header">
+                        <div id="active-filters" class="active-filters">No filters active.</div>
+                        <button id="clear-filters" class="ghost" type="button">Clear</button>
+                      </div>
+                      <div class="filter-grid">
+                        <label class="field">
+                          <span>Tags</span>
+                          <input id="filter-tags" type="text" placeholder="project, planning">
+                        </label>
+                        <label class="field">
+                          <span>Aliases</span>
+                          <input id="filter-aliases" type="text" placeholder="North Star">
+                        </label>
+                        <label class="field">
+                          <span>Path prefix</span>
+                          <input id="filter-path-prefix" type="text" placeholder="/vault/projects">
+                        </label>
+                        <label class="field">
+                          <span>Modified from</span>
+                          <input id="filter-date-from" type="date">
+                        </label>
+                        <label class="field">
+                          <span>Modified to</span>
+                          <input id="filter-date-to" type="date">
+                        </label>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </form>
+            </details>
+          </div>
+          <article id="answer-detail" class="answer-detail empty-state">
+            <div>Ask a question to create an answer workspace.</div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+
