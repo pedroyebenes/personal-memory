@@ -73,6 +73,7 @@ The `/viz` page (`viz.html`) computes clusters and a 3D layout in `app/web.py::_
 - **3D projection** prefers UMAP (`umap-learn`, cosine metric) and falls back to PCA when UMAP is missing. The payload exposes `"projection": "umap" | "pca"`.
 - **Edges** are nearest neighbors in the full-D cosine space (not the 3D projection), so connections reflect semantic similarity.
 - **Cluster labels** use *lift* (in-cluster share / corpus share) over `entity_mentions.canonical_name` so names highlight terms that stand out rather than ones that are merely frequent. Each cluster payload includes `terms`, `top_documents`, `representatives` (chunks nearest to the cluster centroid), `coherence`, and `is_noise` for the UI inspection panel. Requires `umap-learn` and `hdbscan` (already declared in `pyproject.toml`).
+- **Superclusters** group proper clusters into higher-level themes by running agglomerative clustering (cosine, average linkage) over the full-D cluster centroids. Triggered when there are at least four non-noise clusters; the number is `max(2, min(n//3, ceil(sqrt(n))))`. Each cluster gets a `supercluster_id`, and the payload also includes a top-level `superclusters` array with `{id, name, size, cluster_ids, terms, center: [x,y,z], is_noise}`. The 3D `center` is the mean of member chunks' projected positions and drives floating labels rendered as HTML overlays in `viz.html`.
 
 ### Tests
 

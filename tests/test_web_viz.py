@@ -143,3 +143,43 @@ def test_distinctive_labels_prefer_rare_terms_over_common(
     ranks = [t.lower() for t in best["terms"]]
     if "meeting notes" in ranks:
         assert ranks.index("quantum entanglement") < ranks.index("meeting notes")
+
+
+def test_supercluster_payload_is_well_formed(
+    connection, fixture_vault: Path, settings: Settings
+) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    payload = _compute_viz_data(connection)
+
+    assert "superclusters" in payload
+    supers = payload["superclusters"]
+    assert isinstance(supers, list)
+    # Superclusters are optional (need >=4 proper clusters) but when present the
+    # schema must be coherent with the cluster payload.
+    if supers:
+        cluster_ids = {c["id"] for c in payload["clusters"]}
+        seen_cluster_ids: set[int] = set()
+        super_ids = set()
+        for sc in supers:
+            assert "id" in sc and isinstance(sc["id"], int)
+            assert sc["id"] not in super_ids, "duplicate supercluster id"
+            super_ids.add(sc["id"])
+            assert isinstance(sc["name"], str) and sc["name"].strip()
+            assert isinstance(sc["size"], int) and sc["size"] > 0
+            assert isinstance(sc["is_noise"], bool)
+            assert isinstance(sc["terms"], list)
+            assert isinstance(sc["cluster_ids"], list) and sc["cluster_ids"]
+            center = sc["center"]
+            assert isinstance(center, list) and len(center) == 3
+            for coord in center:
+                assert isinstance(coord, float)
+            for cid in sc["cluster_ids"]:
+                assert cid in cluster_ids
+                assert cid not in seen_cluster_ids, "cluster assigned to multiple superclusters"
+                seen_cluster_ids.add(cid)
+
+        # Every cluster referenced by a supercluster should back-reference it.
+        by_cluster_super = {c["id"]: c.get("supercluster_id") for c in payload["clusters"]}
+        for sc in supers:
+            for cid in sc["cluster_ids"]:
+                assert by_cluster_super.get(cid) == sc["id"]

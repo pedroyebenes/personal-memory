@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Personal Memory">
+  <rect width="32" height="32" rx="6" fill="#12121f"/>
+  <g stroke="#9ecfb8" stroke-width="1.1" stroke-linecap="round" fill="none" opacity="0.55">
+    <line x1="16" y1="16" x2="8"  y2="9"/>
+    <line x1="16" y1="16" x2="25" y2="10"/>
+    <line x1="16" y1="16" x2="10" y2="24"/>
+    <line x1="16" y1="16" x2="24" y2="23"/>
+    <line x1="8"  y1="9"  x2="10" y2="24"/>
+    <line x1="25" y1="10" x2="24" y2="23"/>
+  </g>
+  <g fill="#9ecfb8">
+    <circle cx="16" cy="16" r="2.8"/>
+    <circle cx="8"  cy="9"  r="1.9"/>
+    <circle cx="25" cy="10" r="1.9"/>
+    <circle cx="10" cy="24" r="1.9"/>
+    <circle cx="24" cy="23" r="1.9"/>
+  </g>
+</svg>

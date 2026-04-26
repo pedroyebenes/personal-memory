@@ -34,6 +34,7 @@ WEB_ASSET_CONTENT_TYPES = {
     "viz.html": "text/html; charset=utf-8",
     "styles.css": "text/css; charset=utf-8",
     "app.js": "application/javascript; charset=utf-8",
+    "favicon.svg": "image/svg+xml",
 }
 
 
@@ -387,6 +388,53 @@ def _remap_cluster_ids(raw_ids: list[int]) -> tuple[list[int], int | None]:
     return remapped, noise_cluster_id
 
 
+def _assign_superclusters(
+    cluster_centroids: Any,
+    proper_cluster_ids: list[int],
+    noise_cluster_id: int | None,
+) -> tuple[dict[int, int], int]:
+    """Group proper clusters into superclusters via agglomerative cosine clustering.
+
+    Returns a mapping from cluster_id -> supercluster_id and the total
+    supercluster count. The noise cluster (if any) gets its own trailing id.
+    Returns an empty mapping when there are fewer than four proper clusters —
+    superclusters only add signal once there are enough groups to collapse.
+    """
+    import math
+
+    import numpy as np
+
+    n_proper = len(proper_cluster_ids)
+    if n_proper < 4:
+        return {}, 0
+
+    n_super = max(2, min(max(2, n_proper // 3), int(math.ceil(math.sqrt(n_proper)))))
+    n_super = min(n_super, n_proper)
+
+    try:
+        from sklearn.cluster import AgglomerativeClustering
+
+        centroids_array = np.asarray(cluster_centroids, dtype=np.float32)
+        clusterer = AgglomerativeClustering(
+            n_clusters=n_super,
+            metric="cosine",
+            linkage="average",
+        )
+        raw = clusterer.fit_predict(centroids_array)
+    except Exception:
+        return {}, 0
+
+    mapping: dict[int, int] = {}
+    for cluster_id, super_id in zip(proper_cluster_ids, raw, strict=False):
+        mapping[int(cluster_id)] = int(super_id)
+
+    total = n_super
+    if noise_cluster_id is not None:
+        mapping[int(noise_cluster_id)] = total
+        total += 1
+    return mapping, total
+
+
 def _cluster_distinctive_labels(
     chunk_ids: list[int],
     by_chunk: dict[int, list[sqlite3.Row]],
@@ -444,6 +492,82 @@ def _cluster_distinctive_labels(
             return ent
 
     return _cluster_name_from_rows(fallback_rows)
+
+
+def _build_superclusters_payload(
+    *,
+    cluster_state: list[dict[str, Any]],
+    super_by_cluster: dict[int, int],
+    n_superclusters: int,
+    rows: list[sqlite3.Row],
+    cluster_ids: list[int],
+    projected: Any,
+    concept_by_chunk: dict[int, list[sqlite3.Row]],
+    corpus_counter: Counter[str],
+    total_mentions: int,
+    noise_cluster_id: int | None,
+) -> list[dict[str, object]]:
+    """Aggregate child clusters into superclusters with labels and 3D anchors."""
+    if not super_by_cluster or n_superclusters == 0:
+        return []
+
+    by_super: dict[int, list[dict[str, Any]]] = {}
+    for state in cluster_state:
+        cid = int(state["cluster_id"])
+        sid = super_by_cluster.get(cid)
+        if sid is None:
+            continue
+        by_super.setdefault(int(sid), []).append(state)
+
+    payload: list[dict[str, object]] = []
+    for super_id in sorted(by_super.keys()):
+        member_states = by_super[super_id]
+        is_noise = all(bool(s["is_noise"]) for s in member_states)
+
+        member_cluster_ids = sorted(int(s["cluster_id"]) for s in member_states)
+        all_member_indices: list[int] = []
+        for s in member_states:
+            all_member_indices.extend(int(i) for i in s["member_indices"])
+        member_rows = [rows[i] for i in all_member_indices]
+        member_chunk_ids = [int(r["id"]) for r in member_rows]
+
+        if all_member_indices:
+            coords = projected[all_member_indices]
+            center = [
+                float(coords[:, 0].mean()),
+                float(coords[:, 1].mean()),
+                float(coords[:, 2].mean()) if coords.shape[1] > 2 else 0.0,
+            ]
+        else:
+            center = [0.0, 0.0, 0.0]
+
+        if is_noise:
+            name = "Unclassified"
+            terms: list[str] = []
+        else:
+            label = _cluster_distinctive_labels(
+                member_chunk_ids,
+                concept_by_chunk,
+                corpus_counter,
+                total_mentions,
+                member_rows,
+            )
+            name = str(label.get("name") or f"Group {super_id + 1}")
+            terms_value = label.get("terms")
+            terms = [str(t) for t in terms_value] if isinstance(terms_value, list) else []
+
+        payload.append(
+            {
+                "id": super_id,
+                "name": name,
+                "size": len(all_member_indices),
+                "cluster_ids": member_cluster_ids,
+                "terms": terms,
+                "center": center,
+                "is_noise": is_noise,
+            }
+        )
+    return payload
 
 
 def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
@@ -540,18 +664,54 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
             payload["top_concept"] = top
         points.append(payload)
 
-    clusters: list[dict[str, object]] = []
+    # First pass: per-cluster state that superclustering also needs.
+    cluster_state: list[dict[str, Any]] = []
+    proper_cluster_ids: list[int] = []
+    proper_centroid_units: list[Any] = []
     for cluster_id in range(n_clusters):
         member_indices = [i for i, x in enumerate(cluster_ids) if x == cluster_id]
         if not member_indices:
             continue
-        member_rows = [rows[i] for i in member_indices]
-        member_chunk_ids = [int(r["id"]) for r in member_rows]
-
         cluster_vectors = normalized[member_indices]
         centroid = cluster_vectors.mean(axis=0)
         c_norm = float(np.linalg.norm(centroid))
         centroid_unit = centroid / c_norm if c_norm > 0 else centroid
+
+        is_noise = noise_cluster_id is not None and cluster_id == noise_cluster_id
+        cluster_state.append(
+            {
+                "cluster_id": cluster_id,
+                "member_indices": member_indices,
+                "centroid_unit": centroid_unit,
+                "is_noise": is_noise,
+            }
+        )
+        if not is_noise:
+            proper_cluster_ids.append(cluster_id)
+            proper_centroid_units.append(centroid_unit)
+
+    super_by_cluster, n_superclusters = (
+        _assign_superclusters(
+            np.asarray(proper_centroid_units, dtype=np.float32)
+            if proper_centroid_units
+            else np.empty((0, normalized.shape[1]), dtype=np.float32),
+            proper_cluster_ids,
+            noise_cluster_id,
+        )
+        if proper_cluster_ids
+        else ({}, 0)
+    )
+
+    clusters: list[dict[str, object]] = []
+    for state in cluster_state:
+        cluster_id = int(state["cluster_id"])
+        member_indices = state["member_indices"]
+        centroid_unit = state["centroid_unit"]
+        is_noise = bool(state["is_noise"])
+        member_rows = [rows[i] for i in member_indices]
+        member_chunk_ids = [int(r["id"]) for r in member_rows]
+
+        cluster_vectors = normalized[member_indices]
         cos_to_centroid = cluster_vectors @ centroid_unit
         coherence = float(cos_to_centroid.mean()) if cos_to_centroid.size else 0.0
 
@@ -579,7 +739,6 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
             for did, count in doc_counter.most_common(5)
         ]
 
-        is_noise = noise_cluster_id is not None and cluster_id == noise_cluster_id
         label = _cluster_distinctive_labels(
             member_chunk_ids,
             concept_by_chunk,
@@ -594,6 +753,7 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
         terms_value = label.get("terms")
         terms = [str(t) for t in terms_value] if isinstance(terms_value, list) else []
 
+        super_id = super_by_cluster.get(cluster_id)
         clusters.append(
             {
                 "id": cluster_id,
@@ -604,14 +764,30 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
                 "representatives": representatives,
                 "coherence": round(coherence, 4),
                 "is_noise": is_noise,
+                "supercluster_id": super_id,
             }
         )
+
+    superclusters = _build_superclusters_payload(
+        cluster_state=cluster_state,
+        super_by_cluster=super_by_cluster,
+        n_superclusters=n_superclusters,
+        rows=rows,
+        cluster_ids=cluster_ids,
+        projected=projected,
+        concept_by_chunk=concept_by_chunk,
+        corpus_counter=corpus_counter,
+        total_mentions=total_mentions,
+        noise_cluster_id=noise_cluster_id,
+    )
 
     return {
         "points": points,
         "edges": [list(e) for e in sorted(edge_set)],
         "n_clusters": n_clusters,
         "clusters": clusters,
+        "superclusters": superclusters,
+        "n_superclusters": len(superclusters),
         "variance_explained": variance_explained,
         "projection": projection_kind,
     }
@@ -1149,6 +1325,9 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
                     return
                 if parsed.path == "/static/app.js":
                     self._send_asset("app.js")
+                    return
+                if parsed.path in ("/favicon.svg", "/favicon.ico"):
+                    self._send_asset("favicon.svg")
                     return
                 status, response = handle_api_get(self.path, settings, refresh_state, self._with_connection)
                 self._send_json(response, status=status)

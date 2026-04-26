@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Embedding Space — Personal Memory</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -264,6 +265,65 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #error-screen { color: #e07878; display: none; text-align: center; padding: 40px; }
+
+    /* ── Supercluster labels (3D overlay) ── */
+    #supercluster-labels {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 6;
+      overflow: hidden;
+    }
+    .supercluster-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      padding: 4px 10px;
+      background: rgba(12, 12, 26, 0.72);
+      border: 1px solid rgba(158, 207, 184, 0.32);
+      border-radius: 999px;
+      color: #e8e8f4;
+      font: 0.72rem Georgia, serif;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      backdrop-filter: blur(3px);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      pointer-events: auto;
+      cursor: pointer;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .supercluster-label:hover {
+      background: rgba(22, 22, 42, 0.92);
+      border-color: rgba(158, 207, 184, 0.6);
+    }
+    .supercluster-label .sc-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .supercluster-label.noise { opacity: 0.5; font-style: italic; }
+    .supercluster-label.dimmed { opacity: 0.25; }
+
+    /* Legend grouping */
+    .legend-supergroup { margin-bottom: 10px; }
+    .legend-supergroup:last-child { margin-bottom: 0; }
+    .legend-supergroup-head {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.68rem; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #8fb6a2;
+      padding: 4px 4px 3px;
+      margin-top: 2px;
+    }
+    .legend-supergroup-head .sg-swatch {
+      width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
+    }
+    .legend-supergroup-head .sg-name {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    }
+    .legend-supergroup.noise .legend-supergroup-head { color: #8a8a9c; font-style: italic; }
   </style>
 </head>
 <body>
@@ -277,6 +337,7 @@
 </div>
 
 <div id="canvas-container"></div>
+<div id="supercluster-labels" aria-hidden="true"></div>
 
 <div id="sidebar">
   <div id="sidebar-header">
@@ -284,6 +345,7 @@
     <h1>Embedding Space</h1>
     <div class="meta-row" id="meta-chunks"></div>
     <div class="meta-row" id="meta-clusters"></div>
+    <div class="meta-row" id="meta-superclusters"></div>
     <div class="meta-row" id="meta-variance"></div>
   </div>
 
@@ -299,6 +361,9 @@
       <label><input type="checkbox" id="show-edges" checked> Show connections</label>
     </div>
     <div class="ctrl">
+      <label><input type="checkbox" id="show-superclusters" checked> Show supercluster labels</label>
+    </div>
+    <div class="ctrl">
       <span style="white-space:nowrap">Point size</span>
       <input type="range" id="point-size" min="1" max="16" value="5">
     </div>
@@ -308,7 +373,7 @@
   <div id="sidebar-legend">
     <div class="legend-heading">Clusters</div>
     <div id="legend-list"></div>
-    <p class="legend-hint">Click a cluster to see its distinctive concepts, top documents, and representative excerpts. Names highlight terms that stand out relative to the whole corpus.</p>
+    <p class="legend-hint">Clusters are grouped under superclusters (higher-level themes). Click a cluster to inspect it, or click a floating label in the map to zoom into a supercluster.</p>
   </div>
 </div>
 
@@ -393,12 +458,25 @@ const PALETTE = [
   '#6a9fc0','#e0a060','#8a7fc8','#68c890','#d06060',
 ];
 
+// Coarser palette for superclusters — deliberately desaturated so the cluster
+// colors still dominate the point cloud.
+const SUPER_PALETTE = [
+  '#8fb6a2','#c79d6a','#a78bb8','#6f9fc0','#d89595',
+  '#b5ad6a','#88a8b0','#a68fa0','#7fa890','#c79070',
+];
+
 const NOISE_COLOR = '#55556a';
 
 function clusterColor(id) {
   const summary = vizData?.clusters?.find(c => c.id === id);
   if (summary?.is_noise) return NOISE_COLOR;
   return PALETTE[id % PALETTE.length];
+}
+
+function superclusterColor(id) {
+  const summary = vizData?.superclusters?.find(c => c.id === id);
+  if (summary?.is_noise) return NOISE_COLOR;
+  return SUPER_PALETTE[id % SUPER_PALETTE.length];
 }
 
 function clusterSummary(id) {
@@ -424,6 +502,9 @@ let popoverDocumentId = null;
 let popoverFullExpanded = false;
 let notePopoverLayoutMaximized = false;
 let clusterPopoverLayoutMaximized = false;
+let superclusterLabelsVisible = true;
+const superclusterLabels = [];
+const superclusterWorldVec = new THREE.Vector3();
 const fullNoteTextCache = new Map();
 const NP_FONT_MIN = 0.7;
 const NP_FONT_MAX = 1.5;
@@ -445,6 +526,13 @@ async function main() {
     `<strong>${data.points.length.toLocaleString()}</strong> chunks`;
   document.getElementById('meta-clusters').innerHTML =
     `<strong>${data.n_clusters}</strong> clusters`;
+  const nSuper = (data.superclusters || []).filter(s => !s.is_noise).length;
+  const metaSuper = document.getElementById('meta-superclusters');
+  if (metaSuper) {
+    metaSuper.innerHTML = nSuper > 0
+      ? `<strong>${nSuper}</strong> supercluster${nSuper === 1 ? '' : 's'}`
+      : '';
+  }
   const metaVariance = document.getElementById('meta-variance');
   if (data.projection === 'umap') {
     metaVariance.innerHTML = 'Projection: <strong>UMAP</strong> (cosine)';
@@ -459,6 +547,7 @@ async function main() {
   buildPoints(data.points);
   buildEdges(data.points, data.edges);
   buildLegend(data.n_clusters);
+  buildSuperclusterLabels(data.superclusters || []);
   setupHover(data.points);
   setupUIControls();
   document.getElementById('np-read-toggle').addEventListener('click', () => { toggleFullNote(); });
@@ -640,9 +729,94 @@ function focusCluster(clusterId) {
 }
 
 // ── Cluster legend ─────────────────────────────────────────────
+function createLegendItem(summary) {
+  const i = summary.id;
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'legend-item' + (summary.is_noise ? ' noise' : '');
+  item.dataset.clusterId = String(i);
+  const swatch = document.createElement('div');
+  swatch.className = 'legend-swatch';
+  swatch.style.background = clusterColor(i);
+  const text = document.createElement('span');
+  text.className = 'legend-text';
+  const name = document.createElement('span');
+  name.className = 'legend-name';
+  name.textContent = summary.name || `Cluster ${i + 1}`;
+  const count = document.createElement('span');
+  count.className = 'legend-count';
+  count.textContent = `${summary.size.toLocaleString()} chunk${summary.size === 1 ? '' : 's'}`;
+  text.appendChild(name);
+  text.appendChild(count);
+  item.appendChild(swatch);
+  item.appendChild(text);
+  item.addEventListener('click', () => {
+    const wasActive = activeClusterId === i;
+    activeClusterId = wasActive ? null : i;
+    updateLegendState();
+    applyPointStyling();
+    if (activeClusterId !== null) {
+      focusCluster(activeClusterId);
+      openClusterPopover(activeClusterId);
+    } else {
+      closeClusterPopover();
+    }
+  });
+  return item;
+}
+
 function buildLegend(n) {
   const list = document.getElementById('legend-list');
-  const order = (vizData?.clusters || [])
+  list.innerHTML = '';
+  const clusters = vizData?.clusters || [];
+  const superclusters = vizData?.superclusters || [];
+
+  if (superclusters.length > 0) {
+    const byCluster = new Map(clusters.map(c => [c.id, c]));
+    const orderedSupers = superclusters
+      .slice()
+      .sort((a, b) => {
+        if (!!a.is_noise !== !!b.is_noise) return a.is_noise ? 1 : -1;
+        return b.size - a.size;
+      });
+    orderedSupers.forEach(sc => {
+      const group = document.createElement('div');
+      group.className = 'legend-supergroup' + (sc.is_noise ? ' noise' : '');
+      const head = document.createElement('div');
+      head.className = 'legend-supergroup-head';
+      const sw = document.createElement('span');
+      sw.className = 'sg-swatch';
+      sw.style.background = superclusterColor(sc.id);
+      const nm = document.createElement('span');
+      nm.className = 'sg-name';
+      nm.textContent = sc.name || `Group ${sc.id + 1}`;
+      head.appendChild(sw);
+      head.appendChild(nm);
+      group.appendChild(head);
+      const memberClusters = (sc.cluster_ids || [])
+        .map(cid => byCluster.get(cid))
+        .filter(Boolean)
+        .sort((a, b) => {
+          if (!!a.is_noise !== !!b.is_noise) return a.is_noise ? 1 : -1;
+          return b.size - a.size;
+        });
+      memberClusters.forEach(c => group.appendChild(createLegendItem(c)));
+      list.appendChild(group);
+    });
+    // Any cluster not assigned to a supercluster ends up in an extras list.
+    const assigned = new Set();
+    superclusters.forEach(sc => (sc.cluster_ids || []).forEach(cid => assigned.add(cid)));
+    const orphans = clusters.filter(c => !assigned.has(c.id));
+    if (orphans.length) {
+      const group = document.createElement('div');
+      group.className = 'legend-supergroup';
+      orphans.forEach(c => group.appendChild(createLegendItem(c)));
+      list.appendChild(group);
+    }
+    return;
+  }
+
+  const order = clusters
     .slice()
     .sort((a, b) => {
       if (!!a.is_noise !== !!b.is_noise) return a.is_noise ? 1 : -1;
@@ -650,39 +824,7 @@ function buildLegend(n) {
     });
   const iterable = order.length ? order : Array.from({ length: n }, (_, i) => clusterSummary(i));
   iterable.forEach(summary => {
-    const i = summary.id;
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'legend-item' + (summary.is_noise ? ' noise' : '');
-    item.dataset.clusterId = String(i);
-    const swatch = document.createElement('div');
-    swatch.className = 'legend-swatch';
-    swatch.style.background = clusterColor(i);
-    const text = document.createElement('span');
-    text.className = 'legend-text';
-    const name = document.createElement('span');
-    name.className = 'legend-name';
-    name.textContent = summary.name || `Cluster ${i + 1}`;
-    const count = document.createElement('span');
-    count.className = 'legend-count';
-    count.textContent = `${summary.size.toLocaleString()} chunk${summary.size === 1 ? '' : 's'}`;
-    text.appendChild(name);
-    text.appendChild(count);
-    item.appendChild(swatch);
-    item.appendChild(text);
-    item.addEventListener('click', () => {
-      const wasActive = activeClusterId === i;
-      activeClusterId = wasActive ? null : i;
-      updateLegendState();
-      applyPointStyling();
-      if (activeClusterId !== null) {
-        focusCluster(activeClusterId);
-        openClusterPopover(activeClusterId);
-      } else {
-        closeClusterPopover();
-      }
-    });
-    list.appendChild(item);
+    list.appendChild(createLegendItem(summary));
   });
 }
 
@@ -692,6 +834,85 @@ function updateLegendState() {
     item.classList.toggle('active', activeClusterId === clusterId);
     item.classList.toggle('dimmed', activeClusterId !== null && activeClusterId !== clusterId);
   });
+}
+
+// ── Supercluster floating labels ───────────────────────────────
+function buildSuperclusterLabels(superclusters) {
+  const host = document.getElementById('supercluster-labels');
+  if (!host) return;
+  host.innerHTML = '';
+  superclusterLabels.length = 0;
+  if (!superclusters.length) return;
+  superclusters.forEach(sc => {
+    if (!Array.isArray(sc.center) || sc.center.length < 3) return;
+    const el = document.createElement('div');
+    el.className = 'supercluster-label' + (sc.is_noise ? ' noise' : '');
+    el.dataset.superclusterId = String(sc.id);
+    const dot = document.createElement('span');
+    dot.className = 'sc-dot';
+    dot.style.background = superclusterColor(sc.id);
+    el.appendChild(dot);
+    el.appendChild(document.createTextNode(sc.name || `Group ${sc.id + 1}`));
+    el.title = sc.name || `Group ${sc.id + 1}`;
+    el.addEventListener('click', () => {
+      if (sc.is_noise) return;
+      focusSupercluster(sc);
+    });
+    host.appendChild(el);
+    superclusterLabels.push({ el, world: new THREE.Vector3(sc.center[0], sc.center[1], sc.center[2]), data: sc });
+  });
+  updateSuperclusterLabelPositions();
+}
+
+function updateSuperclusterLabelPositions() {
+  if (!superclusterLabels.length || !camera) return;
+  const host = document.getElementById('supercluster-labels');
+  if (!host) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const margin = 8;
+  for (const entry of superclusterLabels) {
+    if (!superclusterLabelsVisible) {
+      entry.el.style.display = 'none';
+      continue;
+    }
+    superclusterWorldVec.copy(entry.world).project(camera);
+    // Behind the camera? Hide.
+    if (superclusterWorldVec.z < -1 || superclusterWorldVec.z > 1) {
+      entry.el.style.display = 'none';
+      continue;
+    }
+    const x = (superclusterWorldVec.x * 0.5 + 0.5) * w;
+    const y = (-superclusterWorldVec.y * 0.5 + 0.5) * h;
+    if (x < -margin || x > w + margin || y < -margin || y > h + margin) {
+      entry.el.style.display = 'none';
+      continue;
+    }
+    entry.el.style.display = '';
+    entry.el.style.left = `${x}px`;
+    entry.el.style.top = `${y}px`;
+  }
+}
+
+function focusSupercluster(sc) {
+  if (!sc || !Array.isArray(sc.cluster_ids)) return;
+  const clusterSet = new Set(sc.cluster_ids);
+  const members = (vizData?.points || []).filter(p => clusterSet.has(p.cluster_id));
+  if (!members.length) return;
+  const center = members.reduce(
+    (acc, p) => acc.add(new THREE.Vector3(p.x, p.y, p.z)),
+    new THREE.Vector3()
+  ).multiplyScalar(1 / members.length);
+  const radius = Math.max(
+    0.9,
+    ...members.map(p => center.distanceTo(new THREE.Vector3(p.x, p.y, p.z)))
+  );
+  const direction = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(center);
+  camera.position.copy(center).add(direction.multiplyScalar(Math.min(5.5, radius * 2.2 + 1.2)));
+  controls.autoRotate = false;
+  document.getElementById('auto-rotate').checked = false;
+  controls.update();
 }
 
 function loadPopoverFontScale() {
@@ -1135,6 +1356,13 @@ function setupUIControls() {
   document.getElementById('show-edges').addEventListener('change', e => {
     if (edgeLines) edgeLines.visible = e.target.checked;
   });
+  const superToggle = document.getElementById('show-superclusters');
+  if (superToggle) {
+    superToggle.addEventListener('change', e => {
+      superclusterLabelsVisible = !!e.target.checked;
+      updateSuperclusterLabelPositions();
+    });
+  }
   document.getElementById('point-size').addEventListener('input', e => {
     if (pointsMesh) pointsMesh.material.size = parseFloat(e.target.value) * 0.009;
   });
@@ -1145,6 +1373,7 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
+  updateSuperclusterLabelPositions();
 }
 
 main();
