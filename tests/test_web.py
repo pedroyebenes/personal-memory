@@ -42,6 +42,9 @@ def test_web_assets_are_split_and_linked() -> None:
     assert ">Rerank<" in html
     assert ">Concept boost<" in html
     assert ">Advanced<" in html
+    assert 'id="help-button"' in html
+    assert 'id="help-dialog"' in html
+    assert "helpDialog.showModal" in js
     assert 'id="active-filter-summary"' in html
     assert 'data-sidebar-view="answers search"' in html
     assert 'data-sidebar-view="concepts"' in html
@@ -62,6 +65,9 @@ def test_web_assets_are_split_and_linked() -> None:
     assert ".sidebar-section[hidden]" in css
     assert 'id="viz-search"' in viz_html
     assert 'id="label-lines"' in viz_html
+    assert 'id="np-maximize"' in viz_html
+    assert 'id="np-font-larger"' in viz_html
+    assert 'id="np-font-smaller"' in viz_html
 
 
 def test_viz_api_returns_named_clusters(connection, fixture_vault: Path, settings: Settings) -> None:

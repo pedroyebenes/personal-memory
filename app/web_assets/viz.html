@@ -134,6 +134,7 @@
 
     /* Pinned note (double-click) — stays until closed */
     #note-popover {
+      --np-font-scale: 1;
       position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
       width: min(420px, calc(100vw - 32px - 248px));
       max-height: min(80vh, 640px);
@@ -142,28 +143,40 @@
       border: 1px solid rgba(158, 207, 184, 0.38);
       border-radius: 8px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-      font-size: 0.78rem; line-height: 1.5; pointer-events: auto;
+      font-size: calc(0.78rem * var(--np-font-scale, 1));
+      line-height: 1.5; pointer-events: auto;
     }
     #note-popover.open { display: flex; }
+    #note-popover.maximized {
+      right: 16px; left: 264px; top: 16px; bottom: 16px;
+      width: auto;
+      max-height: none;
+      transform: none;
+    }
     .note-popover-head {
       display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
       padding: 10px 10px 0 14px; flex-shrink: 0;
     }
-    .note-popover-title { font-size: 0.88rem; color: #fff; font-weight: normal; min-width: 0; }
-    .note-popover-close {
+    .note-popover-title { font-size: 1.128em; color: #fff; font-weight: normal; min-width: 0; }
+    .note-popover-actions { display: flex; align-items: flex-start; gap: 4px; flex-shrink: 0; }
+    .note-popover-icon-btn, .note-popover-close {
       flex-shrink: 0; width: 30px; height: 30px; margin: 0; padding: 0;
       border: 0; border-radius: 5px; cursor: pointer;
       background: rgba(255,255,255,0.06); color: #9ecfb8; font: 1.1rem/1 system-ui, sans-serif;
     }
-    .note-popover-close:hover { background: rgba(255,255,255,0.1); }
+    .note-popover-icon-btn { font-size: 0.95rem; line-height: 1; }
+    .note-popover-font-btn { min-width: 2rem; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; }
+    .note-popover-icon-btn:hover, .note-popover-close:hover { background: rgba(255,255,255,0.1); }
+    .note-popover-icon-btn[aria-pressed="true"] { background: rgba(158, 207, 184, 0.15); }
+    .note-popover-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .note-popover-body { padding: 6px 14px 14px; overflow-y: auto; flex: 1; min-height: 0; }
-    .note-popover-body .tt-doc  { font-size: 0.72rem; color: #666; margin-bottom: 4px; }
+    .note-popover-body .tt-doc  { font-size: 0.923em; color: #666; margin-bottom: 4px; }
     .np-path {
-      font-size: 0.66rem; color: #5a5a6e;
+      font-size: 0.846em; color: #5a5a6e;
       word-break: break-all;
       margin-bottom: 8px;
     }
-    .np-snippet-label { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: #555; margin-bottom: 4px; }
+    .np-snippet-label { font-size: 0.821em; text-transform: uppercase; letter-spacing: 0.06em; color: #555; margin-bottom: 4px; }
     .note-popover-body .tt-text { color: #b8b8cc; white-space: pre-wrap; word-break: break-word; }
     .np-read-row { margin-top: 12px; }
     .np-read-btn {
@@ -172,7 +185,7 @@
       border: 1px solid rgba(158, 207, 184, 0.28);
       background: rgba(158, 207, 184, 0.08);
       color: #9ecfb8;
-      font: 0.75rem Georgia, serif;
+      font-size: 0.962em; font-family: Georgia, serif; line-height: 1.4;
     }
     .np-read-btn:hover { background: rgba(158, 207, 184, 0.14); }
     .np-read-btn:disabled { opacity: 0.55; cursor: wait; }
@@ -187,8 +200,9 @@
       background: rgba(0,0,0,0.22);
     }
     #np-full.open { display: block; }
-    #np-full-text { font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c8c8d8; white-space: pre-wrap; word-break: break-word; margin: 0; }
-    .np-full-status { font: 0.75rem Georgia, serif; color: #888; }
+    #note-popover.maximized #np-full.open { max-height: min(calc(100vh - 200px), 720px); }
+    #np-full-text { font-size: 0.923em; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c8c8d8; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    .np-full-status { font-size: 0.962em; font-family: Georgia, serif; color: #888; }
     .np-full-error   { color: #e07878; }
 
     /* ── Overlays ── */
@@ -270,7 +284,12 @@
 <div id="note-popover" role="dialog" aria-label="Note details">
   <div class="note-popover-head">
     <div class="note-popover-title" id="np-title"></div>
-    <button type="button" class="note-popover-close" id="np-close" aria-label="Close">×</button>
+    <div class="note-popover-actions">
+      <button type="button" class="note-popover-icon-btn note-popover-font-btn" id="np-font-smaller" aria-label="Decrease text size" title="Smaller text">A−</button>
+      <button type="button" class="note-popover-icon-btn note-popover-font-btn" id="np-font-larger" aria-label="Increase text size" title="Larger text">A+</button>
+      <button type="button" class="note-popover-icon-btn" id="np-maximize" aria-pressed="false" aria-label="Maximize note panel" title="Maximize">⤢</button>
+      <button type="button" class="note-popover-close" id="np-close" aria-label="Close">×</button>
+    </div>
   </div>
   <div class="note-popover-body">
     <div class="tt-doc" id="np-doc"></div>
@@ -334,10 +353,16 @@ let notePopoverOpen = false;
 let hoverTooltipPending = null;
 let popoverDocumentId = null;
 let popoverFullExpanded = false;
+let notePopoverLayoutMaximized = false;
 const fullNoteTextCache = new Map();
 const _tmp = new THREE.Vector3();
 const SIDEBAR_WIDTH = 248;
 const LABEL_MARGIN = 12;
+const NP_FONT_MIN = 0.7;
+const NP_FONT_MAX = 1.5;
+const NP_FONT_STEP = 0.1;
+const NP_FONT_STORAGE = 'pm-viz-np-font-scale';
+let npFontScale = 1;
 
 // ── Main ───────────────────────────────────────────────────────
 async function main() {
@@ -366,6 +391,11 @@ async function main() {
   setupHover(data.points);
   setupUIControls();
   document.getElementById('np-read-toggle').addEventListener('click', () => { toggleFullNote(); });
+  document.getElementById('np-maximize').addEventListener('click', () => { toggleNotePopoverLayout(); });
+  document.getElementById('np-font-larger').addEventListener('click', () => { nudgeNpFontScale(NP_FONT_STEP); });
+  document.getElementById('np-font-smaller').addEventListener('click', () => { nudgeNpFontScale(-NP_FONT_STEP); });
+  loadNpFontScale();
+  applyNpFontScale();
 
   document.getElementById('loading').style.display = 'none';
   animate();
@@ -670,6 +700,46 @@ function updateLegendState() {
   });
 }
 
+function loadNpFontScale() {
+  try {
+    const s = localStorage.getItem(NP_FONT_STORAGE);
+    if (s == null) return;
+    const n = parseFloat(s);
+    if (Number.isFinite(n) && n >= NP_FONT_MIN && n <= NP_FONT_MAX) npFontScale = Math.round(n * 100) / 100;
+  } catch { /* private mode or quota */ }
+}
+
+function applyNpFontScale() {
+  const el = document.getElementById('note-popover');
+  el.style.setProperty('--np-font-scale', String(npFontScale));
+  const larger = document.getElementById('np-font-larger');
+  const smaller = document.getElementById('np-font-smaller');
+  larger.disabled = npFontScale >= NP_FONT_MAX - 1e-6;
+  smaller.disabled = npFontScale <= NP_FONT_MIN + 1e-6;
+  try { localStorage.setItem(NP_FONT_STORAGE, String(npFontScale)); } catch { /* */ }
+}
+
+function nudgeNpFontScale(delta) {
+  npFontScale = Math.min(NP_FONT_MAX, Math.max(NP_FONT_MIN, npFontScale + delta));
+  npFontScale = Math.round(npFontScale * 100) / 100;
+  applyNpFontScale();
+}
+
+function setNotePopoverLayoutMaximized(maximized) {
+  notePopoverLayoutMaximized = maximized;
+  const el = document.getElementById('note-popover');
+  const btn = document.getElementById('np-maximize');
+  el.classList.toggle('maximized', maximized);
+  btn.setAttribute('aria-pressed', maximized ? 'true' : 'false');
+  btn.setAttribute('aria-label', maximized ? 'Restore note panel size' : 'Maximize note panel');
+  btn.title = maximized ? 'Restore previous size' : 'Maximize';
+  btn.textContent = maximized ? '⤡' : '⤢';
+}
+
+function toggleNotePopoverLayout() {
+  setNotePopoverLayoutMaximized(!notePopoverLayoutMaximized);
+}
+
 function resetNoteDocumentPanel() {
   const full = document.getElementById('np-full');
   const status = document.getElementById('np-full-status');
@@ -713,6 +783,7 @@ function openNotePopover(p) {
     readBtn.disabled = false;
     readBtn.title = '';
   }
+  setNotePopoverLayoutMaximized(false);
   el.classList.add('open');
   notePopoverOpen = true;
   document.getElementById('tooltip').style.display = 'none';
@@ -766,7 +837,9 @@ async function toggleFullNote() {
 }
 
 function closeNotePopover() {
-  document.getElementById('note-popover').classList.remove('open');
+  const el = document.getElementById('note-popover');
+  el.classList.remove('open');
+  setNotePopoverLayoutMaximized(false);
   notePopoverOpen = false;
   popoverDocumentId = null;
   resetNoteDocumentPanel();
