@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "sqlite-vec>=0.1.6",
 ]
 vec = [
   "sqlite-vec>=0.1.6",

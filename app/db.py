@@ -211,7 +211,24 @@ def _apply_schema_migrations(connection: sqlite3.Connection) -> None:
     if table_exists(connection, "chunk_vectors"):
         _schema_meta_set(connection, "migration_chunk_vectors", str(_infer_embedding_dimension(connection)))
 
+    _migrate_chunk_vectors_to_cosine(connection)
+
     _schema_meta_set(connection, "schema_core_version", "8")
+
+
+def _migrate_chunk_vectors_to_cosine(connection: sqlite3.Connection) -> None:
+    """Recreate non-cosine vec0 tables so KNN matches normalized embedding cosine semantics."""
+    if not sqlite_vec_available(connection):
+        return
+    if not table_exists(connection, "chunk_vectors"):
+        return
+    row = connection.execute(
+        "SELECT value FROM schema_meta WHERE key = ?",
+        ("chunk_vectors_metric",),
+    ).fetchone()
+    if row and str(row["value"]) == "cosine":
+        return
+    connection.execute("DROP TABLE IF EXISTS chunk_vectors")
 
 
 def ensure_chunk_vectors_table(connection: sqlite3.Connection, dimension: int) -> None:
@@ -223,9 +240,15 @@ def ensure_chunk_vectors_table(connection: sqlite3.Connection, dimension: int) -
     if dimension < 1:
         return
     connection.execute(
-        f"CREATE VIRTUAL TABLE chunk_vectors USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[{dimension}])"
+        f"""
+        CREATE VIRTUAL TABLE chunk_vectors USING vec0(
+            chunk_id INTEGER PRIMARY KEY,
+            embedding float[{dimension}] distance_metric=cosine
+        )
+        """
     )
     _schema_meta_set(connection, "migration_chunk_vectors", str(dimension))
+    _schema_meta_set(connection, "chunk_vectors_metric", "cosine")
 
 
 def init_db(connection: sqlite3.Connection, schema_path: Path | None = None) -> None:
