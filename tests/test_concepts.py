@@ -602,6 +602,7 @@ def test_concept_boost_surfaces_in_score_explanation(connection, fixture_vault: 
     assert boosted_top.final_score >= plain_top.final_score
     assert boosted_top.score_explanation
     assert "concept_boost" in boosted_top.score_explanation
+    assert "exact_concept_boost" in boosted_top.score_explanation
     matches = boosted_top.score_explanation.get("concept_matches") or []
     assert any(item["canonical_name"].lower().startswith("project") for item in matches)
 

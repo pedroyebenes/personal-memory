@@ -20,7 +20,7 @@ personal-memory reindex [--vault PATH]
 personal-memory embeddings rebuild [--no-breadcrumbs]
 personal-memory vectors rebuild
 personal-memory concepts reclassify
-personal-memory search --query "..."
+personal-memory search --query "..." [--concept-boost] [--debug-scores]
 personal-memory ask --query "..." [--use-llm]
 personal-memory web [--host HOST] [--port PORT]
 

@@ -301,6 +301,23 @@ def test_search_accepts_rerank_flag(connection, fixture_vault: Path, settings: S
     assert any(item["rerank_score"] > 0 for item in payload["results"])
 
 
+def test_search_accepts_debug_scores_flag(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/search?query=launch%20plan&debug_scores=true",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["debug_scores"] is True
+    assert payload["results"]
+    assert any("fusion_weights" in (item.get("score_explanation") or {}) for item in payload["results"])
+
+
 def test_search_accepts_concept_boost_flag(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     with_connection = lambda callback: callback(connection)

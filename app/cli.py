@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--rewrite-query", action="store_true")
     search_parser.add_argument("--rerank", action="store_true")
     search_parser.add_argument("--concept-boost", action="store_true")
+    search_parser.add_argument(
+        "--debug-scores",
+        action="store_true",
+        help="Include fusion_weights and refresh score_explanation.final_score after ranking",
+    )
 
     ask_parser = subparsers.add_parser("ask")
     ask_parser.add_argument("--query", required=True)
@@ -200,6 +205,7 @@ def main() -> None:
             top_k=args.top_k or settings.top_k,
             use_rerank=args.rerank or None,
             use_concept_boost=args.concept_boost or None,
+            debug_scores=args.debug_scores,
         )
         print(
             json.dumps(

@@ -682,6 +682,7 @@ def handle_api_get(
         top_k = _read_top_k(query_params.get("top_k", [settings.top_k])[0], settings.top_k)
         use_rerank = _read_bool_query(query_params, "rerank", settings.enable_reranking)
         use_concept_boost = _read_bool_query(query_params, "concept_boost", settings.enable_concept_boost)
+        debug_scores = _read_bool_query(query_params, "debug_scores", False)
         filters = _read_filters_from_query(path, settings)
         if not query:
             return HTTPStatus.OK, _success_payload({"results": []})
@@ -696,6 +697,7 @@ def handle_api_get(
                     filters=filters,
                     use_rerank=use_rerank,
                     use_concept_boost=use_concept_boost,
+                    debug_scores=debug_scores,
                 )
             ]
         )
@@ -705,6 +707,7 @@ def handle_api_get(
                 "filters": _serialize_filters(filters),
                 "rerank": use_rerank,
                 "concept_boost": use_concept_boost,
+                "debug_scores": debug_scores,
             }
         )
     raise APIError("not_found", "Not found", status=HTTPStatus.NOT_FOUND)

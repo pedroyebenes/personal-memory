@@ -6,7 +6,11 @@ import sqlite3
 
 from app.config import Settings
 from app.models import RetrievalResult, SearchFilters
-from app.retrieval.concept_search import chunks_with_concepts, find_concepts_for_terms
+from app.retrieval.concept_search import (
+    candidate_keys_from_terms,
+    chunks_with_concepts,
+    find_concepts_for_terms,
+)
 from app.retrieval.keyword_search import keyword_search
 from app.retrieval.rerank import rerank_results
 from app.retrieval.snippets import extract_snippet, query_terms
@@ -14,6 +18,8 @@ from app.retrieval.semantic_search import semantic_search
 from app.retrieval.sources import build_markdown_ref, build_source_ref
 
 CONCEPT_BOOST_WEIGHT = 0.06
+EXACT_CONCEPT_BOOST_STEP = 0.08
+EXACT_CONCEPT_BOOST_MAX = 0.15
 
 
 def _normalize_filters(filters: SearchFilters | None) -> SearchFilters:
@@ -138,6 +144,58 @@ def _metadata_score(
     return metadata_score, explanation
 
 
+def _load_exact_key_entities(connection: sqlite3.Connection, keys: set[str]) -> dict[int, str]:
+    if not keys:
+        return {}
+    placeholders = ",".join("?" for _ in keys)
+    rows = connection.execute(
+        f"""
+        SELECT id, canonical_name
+        FROM entities
+        WHERE entity_type = 'concept' AND normalized_key IN ({placeholders})
+        """,
+        tuple(keys),
+    ).fetchall()
+    return {int(r["id"]): str(r["canonical_name"]) for r in rows}
+
+
+def _apply_exact_concept_boost(
+    connection: sqlite3.Connection,
+    results: list[RetrievalResult],
+    terms: list[str],
+) -> None:
+    if not results or not terms:
+        return
+    keys = candidate_keys_from_terms(terms)
+    entity_map = _load_exact_key_entities(connection, keys)
+    entity_ids = set(entity_map)
+    chunk_ids = {result.chunk_id for result in results}
+    matches = chunks_with_concepts(connection, chunk_ids, entity_ids) if entity_ids else {}
+    for result in results:
+        explanation = result.score_explanation or {}
+        if not entity_map:
+            explanation["exact_concept_boost"] = 0.0
+            explanation["exact_concept_matches"] = []
+            result.score_explanation = explanation
+            continue
+        hit_entities = matches.get(result.chunk_id, set()).intersection(entity_ids)
+        if not hit_entities:
+            explanation["exact_concept_boost"] = 0.0
+            explanation["exact_concept_matches"] = []
+            result.score_explanation = explanation
+            continue
+        raw = len(hit_entities) * EXACT_CONCEPT_BOOST_STEP
+        boost = round(min(raw, EXACT_CONCEPT_BOOST_MAX), 6)
+        result.final_score += boost
+        exact_matches = [
+            {"id": entity_id, "canonical_name": entity_map[entity_id]} for entity_id in sorted(hit_entities)
+        ]
+        explanation["exact_concept_boost"] = boost
+        explanation["exact_concept_matches"] = exact_matches
+        explanation["final_score"] = result.final_score
+        result.score_explanation = explanation
+
+
 def _apply_concept_boost(
     connection: sqlite3.Connection,
     results: list[RetrievalResult],
@@ -183,6 +241,7 @@ def hybrid_search(
     filters: SearchFilters | None = None,
     use_rerank: bool | None = None,
     use_concept_boost: bool | None = None,
+    debug_scores: bool = False,
 ) -> list[RetrievalResult]:
     filters = _normalize_filters(filters)
     should_rerank = settings.enable_reranking if use_rerank is None else use_rerank
@@ -230,9 +289,26 @@ def hybrid_search(
         )
     merged = [item for item in merged if _matches_filters(item, filters, metadata)]
     if should_boost_concepts:
+        for item in merged:
+            explanation = item.score_explanation or {}
+            explanation.setdefault("concept_boost", 0.0)
+            explanation.setdefault("exact_concept_boost", 0.0)
+            explanation.setdefault("concept_matches", [])
+            explanation.setdefault("exact_concept_matches", [])
+            item.score_explanation = explanation
+        _apply_exact_concept_boost(connection, merged, terms)
         _apply_concept_boost(connection, merged, terms)
     merged.sort(key=lambda item: item.final_score, reverse=True)
     if should_rerank:
         chunk_texts = {chunk_id: str(item.get("text") or "") for chunk_id, item in metadata.items()}
         merged = rerank_results(merged, query, chunk_texts)
+    if debug_scores:
+        for item in merged:
+            explanation = item.score_explanation or {}
+            explanation["fusion_weights"] = {
+                "semantic_weight": semantic_weight,
+                "keyword_weight": keyword_weight,
+            }
+            explanation["final_score"] = item.final_score
+            item.score_explanation = explanation
     return merged[:top_k]

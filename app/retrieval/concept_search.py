@@ -39,6 +39,11 @@ def _candidate_keys(terms: list[str]) -> set[str]:
     return {k for k in keys if k and not normalized_key_is_stopword_only(k)}
 
 
+def candidate_keys_from_terms(terms: list[str]) -> set[str]:
+    """Public wrapper for normalized query keys (tokens and contiguous spans)."""
+    return _candidate_keys(terms)
+
+
 def list_concepts(
     connection: sqlite3.Connection,
     *,
