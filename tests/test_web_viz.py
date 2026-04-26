@@ -65,3 +65,81 @@ def test_compute_viz_survives_empty_concept_layer(connection, fixture_vault: Pat
     assert payload["clusters"]
     assert not any(p.get("top_concept") for p in payload["points"])
     assert all(c.get("name") for c in payload["clusters"])
+
+
+def test_cluster_payload_has_representatives_and_top_documents(
+    connection, fixture_vault: Path, settings: Settings
+) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    payload = _compute_viz_data(connection)
+
+    assert payload["projection"] in {"umap", "pca"}
+    assert payload["clusters"], "expected at least one cluster"
+
+    chunk_ids = {int(p["id"]) for p in payload["points"]}
+    doc_ids = {int(p["document_id"]) for p in payload["points"]}
+
+    for cluster in payload["clusters"]:
+        assert cluster["size"] > 0
+        assert 0.0 <= float(cluster["coherence"]) <= 1.0
+        assert isinstance(cluster["is_noise"], bool)
+        assert isinstance(cluster["terms"], list)
+
+        reps = cluster["representatives"]
+        assert reps, f"cluster {cluster['id']} has no representatives"
+        assert len(reps) <= 3
+        for rep in reps:
+            assert int(rep["chunk_id"]) in chunk_ids
+            assert "snippet" in rep
+            assert "document_title" in rep
+
+        docs = cluster["top_documents"]
+        assert docs, f"cluster {cluster['id']} has no top documents"
+        assert len(docs) <= 5
+        assert sum(int(d["count"]) for d in docs) <= cluster["size"]
+        for doc in docs:
+            assert int(doc["document_id"]) in doc_ids
+            assert isinstance(doc["title"], str)
+
+
+def test_distinctive_labels_prefer_rare_terms_over_common(
+    connection, tmp_path: Path, settings: Settings
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    # ``Meeting Notes`` appears in every file → should NOT dominate any cluster.
+    # ``Quantum Entanglement`` is unique to one file → must surface as distinctive.
+    (vault / "general-1.md").write_text(
+        "# Weekly\n\nFrom [[Meeting Notes]]: tasks discussed. [[Meeting Notes]] continued.\n",
+        encoding="utf-8",
+    )
+    (vault / "general-2.md").write_text(
+        "# Weekly\n\n[[Meeting Notes]] again. Another [[Meeting Notes]] entry.\n",
+        encoding="utf-8",
+    )
+    (vault / "general-3.md").write_text(
+        "# Weekly\n\nMore [[Meeting Notes]] chatter and [[Meeting Notes]] minutes.\n",
+        encoding="utf-8",
+    )
+    (vault / "physics.md").write_text(
+        "# Physics\n\nNotes on [[Quantum Entanglement]] and more [[Quantum Entanglement]] work.\n",
+        encoding="utf-8",
+    )
+
+    ingest_vault(connection, vault, settings)
+    payload = _compute_viz_data(connection)
+
+    all_terms = {term.lower() for cluster in payload["clusters"] for term in cluster["terms"]}
+    assert "quantum entanglement" in all_terms, (
+        "distinctive label should surface the rare concept: " f"clusters={payload['clusters']}"
+    )
+
+    physics_clusters = [
+        c for c in payload["clusters"]
+        if any("quantum entanglement" in t.lower() for t in c["terms"])
+    ]
+    assert physics_clusters, "rare term should be among the terms of at least one cluster"
+    best = physics_clusters[0]
+    ranks = [t.lower() for t in best["terms"]]
+    if "meeting notes" in ranks:
+        assert ranks.index("quantum entanglement") < ranks.index("meeting notes")

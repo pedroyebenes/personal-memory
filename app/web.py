@@ -286,11 +286,169 @@ def _cluster_name_from_rows(rows: list[sqlite3.Row]) -> dict[str, object]:
     return {"name": " / ".join(chosen[:2]), "terms": chosen[:5], "size": len(rows)}
 
 
+def _cluster_full_d(normalized: Any) -> tuple[list[int], bool]:
+    """Cluster normalized embeddings in full dimensionality.
+
+    Tries HDBSCAN (density-based, auto-k, emits -1 for noise). Falls back to
+    MiniBatchKMeans on the full-D vectors when HDBSCAN is unavailable or
+    produces fewer than two non-noise clusters.
+    """
+    n = len(normalized)
+    if n == 0:
+        return [], False
+    if n == 1:
+        return [0], False
+
+    expected = max(5, min(20, int(round(n ** 0.5))))
+
+    try:
+        import hdbscan
+
+        # Use 'leaf' selection so the hierarchy is cut low — it produces many
+        # fine-grained clusters that match what users expect from a topic map.
+        # 'eom' (excess of mass) tends to merge almost everything into 1-2 groups
+        # for semantic embeddings.
+        min_cluster_size = max(3, min(12, int(round(n ** 0.3))))
+        min_cluster_size = min(min_cluster_size, max(2, n // 3))
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=max(1, min_cluster_size // 2),
+            metric="euclidean",
+            cluster_selection_method="leaf",
+        )
+        labels = [int(x) for x in clusterer.fit_predict(normalized)]
+        unique = set(labels)
+        non_noise = unique - {-1}
+        # Only accept HDBSCAN when it produces a reasonable number of clusters
+        # relative to the expected ~sqrt(N). Otherwise KMeans below gives a
+        # more useful map at the cost of hard boundaries.
+        if len(non_noise) >= max(4, expected // 2):
+            return labels, -1 in unique
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    from sklearn.cluster import MiniBatchKMeans
+
+    n_clusters = min(expected, n)
+    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, n_init=3)
+    labels = [int(x) for x in kmeans.fit_predict(normalized)]
+    return labels, False
+
+
+def _project_3d(normalized: Any, raw_vectors: Any) -> tuple[Any, str, list[float]]:
+    """Project embeddings to 3D for rendering.
+
+    Prefers UMAP (cosine metric, much better separation of semantic clusters)
+    and falls back to PCA when UMAP is missing or fails.
+    """
+    import numpy as np
+
+    n = len(normalized)
+    try:
+        import umap  # type: ignore[import-not-found]
+
+        n_neighbors = max(2, min(15, n - 1))
+        reducer = umap.UMAP(
+            n_components=3,
+            metric="cosine",
+            n_neighbors=n_neighbors,
+            min_dist=0.1,
+            random_state=42,
+        )
+        projected = np.asarray(reducer.fit_transform(normalized), dtype=np.float32)
+        if projected.ndim == 1:
+            projected = projected.reshape(-1, 1)
+        return projected, "umap", []
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    from sklearn.decomposition import PCA
+
+    n_components = min(3, raw_vectors.shape[0], raw_vectors.shape[1])
+    pca = PCA(n_components=n_components)
+    projected = pca.fit_transform(raw_vectors).astype(np.float32)
+    return projected, "pca", pca.explained_variance_ratio_.tolist()
+
+
+def _remap_cluster_ids(raw_ids: list[int]) -> tuple[list[int], int | None]:
+    """Renumber cluster ids to a contiguous 0..k-1 range; noise (-1) goes last."""
+    uniques = sorted({int(x) for x in raw_ids})
+    non_noise = [c for c in uniques if c != -1]
+    mapping: dict[int, int] = {orig: idx for idx, orig in enumerate(non_noise)}
+    noise_cluster_id: int | None = None
+    if -1 in uniques:
+        noise_cluster_id = len(non_noise)
+        mapping[-1] = noise_cluster_id
+    remapped = [mapping[int(x)] for x in raw_ids]
+    return remapped, noise_cluster_id
+
+
+def _cluster_distinctive_labels(
+    chunk_ids: list[int],
+    by_chunk: dict[int, list[sqlite3.Row]],
+    corpus_counter: Counter[str],
+    total_mentions: int,
+    fallback_rows: list[sqlite3.Row],
+    *,
+    conn: sqlite3.Connection | None = None,
+    cluster_row_indices: list[int] | None = None,
+    vectors: Any | None = None,
+) -> dict[str, object]:
+    """Label a cluster by *distinctive* concepts (lift over corpus share)."""
+    import math
+
+    cluster_counter: Counter[str] = Counter()
+    for cid in chunk_ids:
+        for row in by_chunk.get(cid, []):
+            cluster_counter[str(row["canonical_name"])] += 1
+
+    total_in_cluster = sum(cluster_counter.values())
+    # Require repeats in larger clusters (noise filter) but allow singletons
+    # when the cluster only has 1-2 chunks — wikilink dedupe makes counts small.
+    min_count = 2 if len(fallback_rows) >= 3 else 1
+    scored: list[tuple[float, float, int, str]] = []
+    if total_in_cluster > 0 and total_mentions > 0:
+        for name, count in cluster_counter.items():
+            if count < min_count:
+                continue
+            in_share = count / total_in_cluster
+            corpus_count = corpus_counter.get(name, count)
+            corpus_share = corpus_count / total_mentions
+            if corpus_share <= 0:
+                continue
+            lift = in_share / corpus_share
+            score = lift * math.log(1 + count)
+            scored.append((score, lift, count, name))
+
+    scored.sort(key=lambda item: (-item[0], -item[2], item[3]))
+    if scored:
+        chosen = [name for (_, _, _, name) in scored][:5]
+        return {
+            "name": " / ".join(chosen[:2]),
+            "terms": chosen,
+            "size": len(fallback_rows),
+        }
+
+    if (
+        conn is not None
+        and cluster_row_indices is not None
+        and vectors is not None
+        and len(fallback_rows) >= 3
+    ):
+        ent = _cluster_name_from_entity_centroid(conn, cluster_row_indices, vectors)
+        if ent:
+            return ent
+
+    return _cluster_name_from_rows(fallback_rows)
+
+
 def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     try:
         import numpy as np
-        from sklearn.cluster import MiniBatchKMeans
-        from sklearn.decomposition import PCA
         from sklearn.neighbors import NearestNeighbors
     except ImportError as exc:
         raise APIError(
@@ -315,41 +473,52 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     """).fetchall()
 
     if not rows:
-        return {"points": [], "edges": [], "n_clusters": 0, "clusters": [], "variance_explained": []}
+        return {
+            "points": [],
+            "edges": [],
+            "n_clusters": 0,
+            "clusters": [],
+            "variance_explained": [],
+            "projection": "none",
+        }
 
     chunk_ids = [int(r["id"]) for r in rows]
     concept_by_chunk = _load_chunk_concept_mentions(conn, chunk_ids)
 
     vectors = np.array([json.loads(r["vector_json"]) for r in rows], dtype=np.float32)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    normalized = (vectors / norms).astype(np.float32)
 
-    # PCA to 3D
-    n_components = min(3, vectors.shape[0], vectors.shape[1])
-    pca = PCA(n_components=n_components)
-    projected = pca.fit_transform(vectors)
+    raw_cluster_ids, _hdbscan_noise = _cluster_full_d(normalized)
+    cluster_ids, noise_cluster_id = _remap_cluster_ids(raw_cluster_ids)
+    n_clusters = len(set(cluster_ids)) if cluster_ids else 0
 
-    scale = float(np.abs(projected).max())
+    projected, projection_kind, variance_explained = _project_3d(normalized, vectors)
+
+    scale = float(np.abs(projected).max()) if projected.size else 0.0
     if scale > 0:
         projected = projected / scale
 
     while projected.shape[1] < 3:
         projected = np.column_stack([projected, np.zeros(len(projected), dtype=np.float32)])
 
-    # K-means clusters in 3D PCA space (fast, visually consistent)
-    n_clusters = max(5, min(20, int(len(rows) ** 0.5)))
-    n_clusters = min(n_clusters, len(rows))
-    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, n_init=3)
-    cluster_ids = kmeans.fit_predict(projected).tolist()
-
-    # Nearest-neighbor edges in 3D PCA space (k=3 per point)
-    k_nn = min(3, len(rows) - 1)
-    nn = NearestNeighbors(n_neighbors=k_nn + 1, algorithm="ball_tree")
-    nn.fit(projected)
-    _, indices = nn.kneighbors(projected)
-
+    # kNN edges in full-D cosine space — edges now reflect semantic similarity.
     edge_set: set[tuple[int, int]] = set()
-    for i, neighbors in enumerate(indices):
-        for j in neighbors[1:]:
-            edge_set.add((min(i, int(j)), max(i, int(j))))
+    k_nn = min(3, len(rows) - 1)
+    if k_nn >= 1:
+        nn = NearestNeighbors(n_neighbors=k_nn + 1, metric="cosine")
+        nn.fit(normalized)
+        _, indices = nn.kneighbors(normalized)
+        for i, neighbors in enumerate(indices):
+            for j in neighbors[1:]:
+                edge_set.add((min(i, int(j)), max(i, int(j))))
+
+    corpus_counter: Counter[str] = Counter()
+    for mentions in concept_by_chunk.values():
+        for row in mentions:
+            corpus_counter[str(row["canonical_name"])] += 1
+    total_mentions = sum(corpus_counter.values())
 
     points: list[dict[str, object]] = []
     for i, r in enumerate(rows):
@@ -370,35 +539,81 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
         if top:
             payload["top_concept"] = top
         points.append(payload)
-    cluster_rows: dict[int, list[sqlite3.Row]] = {cluster_id: [] for cluster_id in range(n_clusters)}
-    for i, row in enumerate(rows):
-        cluster_rows[cluster_ids[i]].append(row)
-    clusters = []
-    id_to_index = {int(r["id"]): i for i, r in enumerate(rows)}
+
+    clusters: list[dict[str, object]] = []
     for cluster_id in range(n_clusters):
-        cluster_row_list = cluster_rows[cluster_id]
-        c_ids = [int(r["id"]) for r in cluster_row_list]
-        cluster_indices = [id_to_index[cid] for cid in c_ids if cid in id_to_index]
+        member_indices = [i for i, x in enumerate(cluster_ids) if x == cluster_id]
+        if not member_indices:
+            continue
+        member_rows = [rows[i] for i in member_indices]
+        member_chunk_ids = [int(r["id"]) for r in member_rows]
+
+        cluster_vectors = normalized[member_indices]
+        centroid = cluster_vectors.mean(axis=0)
+        c_norm = float(np.linalg.norm(centroid))
+        centroid_unit = centroid / c_norm if c_norm > 0 else centroid
+        cos_to_centroid = cluster_vectors @ centroid_unit
+        coherence = float(cos_to_centroid.mean()) if cos_to_centroid.size else 0.0
+
+        n_reps = min(3, len(member_indices))
+        rep_local = np.argsort(-cos_to_centroid)[:n_reps].tolist()
+        representatives = []
+        for li in rep_local:
+            r = member_rows[int(li)]
+            representatives.append(
+                {
+                    "chunk_id": int(r["id"]),
+                    "document_title": str(r["document_title"] or ""),
+                    "snippet": _truncate(r["text"]),
+                }
+            )
+
+        doc_counter: Counter[int] = Counter()
+        doc_titles: dict[int, str] = {}
+        for r in member_rows:
+            did = int(r["document_id"])
+            doc_counter[did] += 1
+            doc_titles[did] = str(r["document_title"] or "")
+        top_documents = [
+            {"document_id": did, "title": doc_titles[did], "count": count}
+            for did, count in doc_counter.most_common(5)
+        ]
+
+        is_noise = noise_cluster_id is not None and cluster_id == noise_cluster_id
+        label = _cluster_distinctive_labels(
+            member_chunk_ids,
+            concept_by_chunk,
+            corpus_counter,
+            total_mentions,
+            member_rows,
+            conn=conn,
+            cluster_row_indices=member_indices,
+            vectors=vectors,
+        )
+        name = "Unclassified" if is_noise else str(label.get("name") or f"Cluster {cluster_id + 1}")
+        terms_value = label.get("terms")
+        terms = [str(t) for t in terms_value] if isinstance(terms_value, list) else []
+
         clusters.append(
             {
                 "id": cluster_id,
-                **_cluster_name_from_chunk_concepts(
-                    c_ids,
-                    concept_by_chunk,
-                    cluster_row_list,
-                    conn=conn,
-                    cluster_row_indices=cluster_indices,
-                    vectors=vectors,
-                ),
+                "name": name,
+                "size": len(member_indices),
+                "terms": terms,
+                "top_documents": top_documents,
+                "representatives": representatives,
+                "coherence": round(coherence, 4),
+                "is_noise": is_noise,
             }
         )
 
     return {
         "points": points,
-        "edges": [list(e) for e in edge_set],
+        "edges": [list(e) for e in sorted(edge_set)],
         "n_clusters": n_clusters,
         "clusters": clusters,
-        "variance_explained": pca.explained_variance_ratio_.tolist(),
+        "variance_explained": variance_explained,
+        "projection": projection_kind,
     }
 
 

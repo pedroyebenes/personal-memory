@@ -67,6 +67,13 @@ This is a local-first personal knowledge system that indexes Obsidian Markdown v
 
 Static assets live in `app/web_assets/`. REST endpoints include `/api/status`, `/api/search`, `/api/chat`, `/api/refresh`, `/api/concepts`, `/api/concepts/search?q=...` (semantic concept layer), and `/api/viz`.
 
+The `/viz` page (`viz.html`) computes clusters and a 3D layout in `app/web.py::_compute_viz_data`:
+
+- **Clustering** runs in the *full* embedding space via HDBSCAN (`hdbscan`) with a `min_cluster_size` scaled to corpus size; noise points (label `-1`) are surfaced as an "Unclassified" cluster. Falls back to `MiniBatchKMeans` on full-D vectors when `hdbscan` is unavailable or finds a single group.
+- **3D projection** prefers UMAP (`umap-learn`, cosine metric) and falls back to PCA when UMAP is missing. The payload exposes `"projection": "umap" | "pca"`.
+- **Edges** are nearest neighbors in the full-D cosine space (not the 3D projection), so connections reflect semantic similarity.
+- **Cluster labels** use *lift* (in-cluster share / corpus share) over `entity_mentions.canonical_name` so names highlight terms that stand out rather than ones that are merely frequent. Each cluster payload includes `terms`, `top_documents`, `representatives` (chunks nearest to the cluster centroid), `coherence`, and `is_noise` for the UI inspection panel. Requires `umap-learn` and `hdbscan` (already declared in `pyproject.toml`).
+
 ### Tests
 
 `tests/conftest.py` provides `fixture_vault`, `settings`, and `connection` fixtures. `tests/fixtures/vault/` has sample Markdown for integration tests. `tests/test_integration.py` runs end-to-end workflows.

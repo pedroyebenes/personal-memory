@@ -78,6 +78,8 @@
       box-shadow: inset 0 0 0 1px rgba(158,207,184,0.18);
     }
     .legend-item.dimmed { opacity: 0.42; }
+    .legend-item.noise .legend-swatch { background: #55556a !important; }
+    .legend-item.noise .legend-name { color: #8a8a9c; font-style: italic; }
     .legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .legend-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
     .legend-name {
@@ -88,6 +90,70 @@
     }
     .legend-count { font-size: 0.66rem; color: #666; }
     .legend-hint { font-size: 0.68rem; color: #555; line-height: 1.45; margin-top: 10px; }
+
+    /* Cluster detail panel */
+    #cluster-popover {
+      --np-font-scale: 1;
+      position: fixed; left: 264px; top: 50%; transform: translateY(-50%);
+      width: min(360px, calc(100vw - 32px - 248px));
+      max-height: min(80vh, 640px);
+      display: none; flex-direction: column; z-index: 35;
+      background: rgba(10, 10, 24, 0.97);
+      border: 1px solid rgba(158, 207, 184, 0.38);
+      border-radius: 8px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+      font-size: calc(0.78rem * var(--np-font-scale, 1));
+      line-height: 1.5; pointer-events: auto;
+    }
+    #cluster-popover.open { display: flex; }
+    #cluster-popover.maximized {
+      left: 264px !important; right: 16px !important; top: 16px !important; bottom: 16px !important;
+      width: auto;
+      max-height: none;
+      transform: none !important;
+    }
+    .cp-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+      padding: 10px 10px 0 14px; flex-shrink: 0;
+      cursor: grab;
+      user-select: none;
+    }
+    .cp-head:active { cursor: grabbing; }
+    .cp-title-wrap { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .cp-title { font-size: 1.128em; color: #fff; font-weight: normal; }
+    .cp-sub { font-size: 0.821em; color: #777; }
+    .cp-sub .cp-dot { margin: 0 6px; color: #3a3a4c; }
+    .cp-actions { display: flex; align-items: flex-start; gap: 4px; flex-shrink: 0; }
+    .cp-body { padding: 6px 16px 14px; overflow-y: auto; flex: 1; min-height: 0; }
+    .cp-section { margin-top: 12px; }
+    .cp-section:first-child { margin-top: 6px; }
+    .cp-section-label {
+      font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.09em;
+      color: #555; margin-bottom: 6px;
+    }
+    .cp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .cp-chip {
+      font-size: 0.7rem; color: #d8e2dc;
+      background: rgba(158, 207, 184, 0.1);
+      border: 1px solid rgba(158, 207, 184, 0.22);
+      border-radius: 11px; padding: 2px 9px;
+    }
+    .cp-doc, .cp-rep {
+      width: 100%; display: block; text-align: left;
+      border: 0; border-radius: 5px; cursor: pointer;
+      background: transparent; color: inherit;
+      font: 0.75rem/1.45 Georgia, serif;
+      padding: 5px 7px; margin: 0 0 3px;
+    }
+    .cp-doc:hover, .cp-rep:hover { background: rgba(255,255,255,0.055); }
+    .cp-doc-title { color: #d0d0dc; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cp-doc-count { font-size: 0.66rem; color: #68687a; }
+    .cp-rep-title { color: #cfe3d7; display: block; margin-bottom: 2px; }
+    .cp-rep-snippet {
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; color: #8c8ca0; font-size: 0.72rem;
+    }
+    .cp-empty { font-size: 0.72rem; color: #555; font-style: italic; }
 
     /* ── Tooltip ── */
     #tooltip {
@@ -118,15 +184,21 @@
     }
     #note-popover.open { display: flex; }
     #note-popover.maximized {
-      right: 16px; left: 264px; top: 16px; bottom: 16px;
+      right: 16px !important; left: 264px !important; top: 16px !important; bottom: 16px !important;
       width: auto;
       max-height: none;
-      transform: none;
+      transform: none !important;
     }
     .note-popover-head {
       display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
       padding: 10px 10px 0 14px; flex-shrink: 0;
+      cursor: grab;
+      user-select: none;
     }
+    .note-popover-head:active { cursor: grabbing; }
+    #note-popover.dragging, #cluster-popover.dragging { box-shadow: 0 20px 60px rgba(0,0,0,0.7); }
+    #note-popover.maximized .note-popover-head,
+    #cluster-popover.maximized .cp-head { cursor: default; }
     .note-popover-title { font-size: 1.128em; color: #fff; font-weight: normal; min-width: 0; }
     .note-popover-actions { display: flex; align-items: flex-start; gap: 4px; flex-shrink: 0; }
     .note-popover-icon-btn, .note-popover-close {
@@ -236,7 +308,7 @@
   <div id="sidebar-legend">
     <div class="legend-heading">Clusters</div>
     <div id="legend-list"></div>
-    <p class="legend-hint">Cluster names summarize recurring concepts in that region. Points are not labeled on the canvas; use the tooltip and pinned panel to read titles.</p>
+    <p class="legend-hint">Click a cluster to see its distinctive concepts, top documents, and representative excerpts. Names highlight terms that stand out relative to the whole corpus.</p>
   </div>
 </div>
 
@@ -244,6 +316,35 @@
   <div class="tt-concept" id="tt-concept"></div>
   <div class="tt-doc"     id="tt-doc"></div>
   <div class="tt-text"    id="tt-text"></div>
+</div>
+
+<div id="cluster-popover" role="dialog" aria-label="Cluster details">
+  <div class="cp-head">
+    <div class="cp-title-wrap">
+      <div class="cp-title" id="cp-title"></div>
+      <div class="cp-sub" id="cp-sub"></div>
+    </div>
+    <div class="cp-actions">
+      <button type="button" class="note-popover-icon-btn note-popover-font-btn" id="cp-font-smaller" aria-label="Decrease text size" title="Smaller text">A−</button>
+      <button type="button" class="note-popover-icon-btn note-popover-font-btn" id="cp-font-larger" aria-label="Increase text size" title="Larger text">A+</button>
+      <button type="button" class="note-popover-icon-btn" id="cp-maximize" aria-pressed="false" aria-label="Maximize cluster panel" title="Maximize">⤢</button>
+      <button type="button" class="note-popover-close" id="cp-close" aria-label="Close">×</button>
+    </div>
+  </div>
+  <div class="cp-body">
+    <div class="cp-section" id="cp-terms-section">
+      <div class="cp-section-label">Distinctive concepts</div>
+      <div class="cp-chips" id="cp-terms"></div>
+    </div>
+    <div class="cp-section" id="cp-docs-section">
+      <div class="cp-section-label">Top documents</div>
+      <div id="cp-docs"></div>
+    </div>
+    <div class="cp-section" id="cp-reps-section">
+      <div class="cp-section-label">Representative excerpts</div>
+      <div id="cp-reps"></div>
+    </div>
+  </div>
 </div>
 
 <div id="note-popover" role="dialog" aria-label="Note details">
@@ -292,7 +393,13 @@ const PALETTE = [
   '#6a9fc0','#e0a060','#8a7fc8','#68c890','#d06060',
 ];
 
-function clusterColor(id) { return PALETTE[id % PALETTE.length]; }
+const NOISE_COLOR = '#55556a';
+
+function clusterColor(id) {
+  const summary = vizData?.clusters?.find(c => c.id === id);
+  if (summary?.is_noise) return NOISE_COLOR;
+  return PALETTE[id % PALETTE.length];
+}
 
 function clusterSummary(id) {
   return vizData?.clusters?.find(c => c.id === id) || { id, name: `Cluster ${id + 1}`, size: 0 };
@@ -316,12 +423,13 @@ let hoverTooltipPending = null;
 let popoverDocumentId = null;
 let popoverFullExpanded = false;
 let notePopoverLayoutMaximized = false;
+let clusterPopoverLayoutMaximized = false;
 const fullNoteTextCache = new Map();
 const NP_FONT_MIN = 0.7;
 const NP_FONT_MAX = 1.5;
 const NP_FONT_STEP = 0.1;
-const NP_FONT_STORAGE = 'pm-viz-np-font-scale';
-let npFontScale = 1;
+const POPOVER_FONT_STORAGE = 'pm-viz-popover-font-scale';
+let popoverFontScale = 1;
 
 // ── Main ───────────────────────────────────────────────────────
 async function main() {
@@ -337,9 +445,14 @@ async function main() {
     `<strong>${data.points.length.toLocaleString()}</strong> chunks`;
   document.getElementById('meta-clusters').innerHTML =
     `<strong>${data.n_clusters}</strong> clusters`;
-  if (data.variance_explained?.length) {
+  const metaVariance = document.getElementById('meta-variance');
+  if (data.projection === 'umap') {
+    metaVariance.innerHTML = 'Projection: <strong>UMAP</strong> (cosine)';
+  } else if (data.projection === 'pca' && data.variance_explained?.length) {
     const pct = data.variance_explained.slice(0, 3).map(v => (v * 100).toFixed(1) + '%').join(' + ');
-    document.getElementById('meta-variance').innerHTML = `PCA variance: ${pct}`;
+    metaVariance.innerHTML = `Projection: PCA · variance ${pct}`;
+  } else {
+    metaVariance.innerHTML = '';
   }
 
   setupScene();
@@ -350,10 +463,21 @@ async function main() {
   setupUIControls();
   document.getElementById('np-read-toggle').addEventListener('click', () => { toggleFullNote(); });
   document.getElementById('np-maximize').addEventListener('click', () => { toggleNotePopoverLayout(); });
-  document.getElementById('np-font-larger').addEventListener('click', () => { nudgeNpFontScale(NP_FONT_STEP); });
-  document.getElementById('np-font-smaller').addEventListener('click', () => { nudgeNpFontScale(-NP_FONT_STEP); });
-  loadNpFontScale();
-  applyNpFontScale();
+  document.getElementById('np-font-larger').addEventListener('click', () => { nudgePopoverFontScale(NP_FONT_STEP); });
+  document.getElementById('np-font-smaller').addEventListener('click', () => { nudgePopoverFontScale(-NP_FONT_STEP); });
+  document.getElementById('cp-maximize').addEventListener('click', () => { toggleClusterPopoverLayout(); });
+  document.getElementById('cp-font-larger').addEventListener('click', () => { nudgePopoverFontScale(NP_FONT_STEP); });
+  document.getElementById('cp-font-smaller').addEventListener('click', () => { nudgePopoverFontScale(-NP_FONT_STEP); });
+  loadPopoverFontScale();
+  applyPopoverFontScale();
+  makeDraggable(
+    document.getElementById('note-popover'),
+    document.querySelector('#note-popover .note-popover-head'),
+  );
+  makeDraggable(
+    document.getElementById('cluster-popover'),
+    document.querySelector('#cluster-popover .cp-head'),
+  );
 
   document.getElementById('loading').style.display = 'none';
   animate();
@@ -518,11 +642,18 @@ function focusCluster(clusterId) {
 // ── Cluster legend ─────────────────────────────────────────────
 function buildLegend(n) {
   const list = document.getElementById('legend-list');
-  for (let i = 0; i < n; i++) {
-    const summary = clusterSummary(i);
+  const order = (vizData?.clusters || [])
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_noise !== !!b.is_noise) return a.is_noise ? 1 : -1;
+      return b.size - a.size;
+    });
+  const iterable = order.length ? order : Array.from({ length: n }, (_, i) => clusterSummary(i));
+  iterable.forEach(summary => {
+    const i = summary.id;
     const item = document.createElement('button');
     item.type = 'button';
-    item.className = 'legend-item';
+    item.className = 'legend-item' + (summary.is_noise ? ' noise' : '');
     item.dataset.clusterId = String(i);
     const swatch = document.createElement('div');
     swatch.className = 'legend-swatch';
@@ -540,13 +671,19 @@ function buildLegend(n) {
     item.appendChild(swatch);
     item.appendChild(text);
     item.addEventListener('click', () => {
-      activeClusterId = activeClusterId === i ? null : i;
+      const wasActive = activeClusterId === i;
+      activeClusterId = wasActive ? null : i;
       updateLegendState();
       applyPointStyling();
-      if (activeClusterId !== null) focusCluster(activeClusterId);
+      if (activeClusterId !== null) {
+        focusCluster(activeClusterId);
+        openClusterPopover(activeClusterId);
+      } else {
+        closeClusterPopover();
+      }
     });
     list.appendChild(item);
-  }
+  });
 }
 
 function updateLegendState() {
@@ -557,35 +694,52 @@ function updateLegendState() {
   });
 }
 
-function loadNpFontScale() {
+function loadPopoverFontScale() {
   try {
-    const s = localStorage.getItem(NP_FONT_STORAGE);
+    const s = localStorage.getItem(POPOVER_FONT_STORAGE);
     if (s == null) return;
     const n = parseFloat(s);
-    if (Number.isFinite(n) && n >= NP_FONT_MIN && n <= NP_FONT_MAX) npFontScale = Math.round(n * 100) / 100;
+    if (Number.isFinite(n) && n >= NP_FONT_MIN && n <= NP_FONT_MAX) popoverFontScale = Math.round(n * 100) / 100;
   } catch { /* private mode or quota */ }
 }
 
-function applyNpFontScale() {
-  const el = document.getElementById('note-popover');
-  el.style.setProperty('--np-font-scale', String(npFontScale));
-  const larger = document.getElementById('np-font-larger');
-  const smaller = document.getElementById('np-font-smaller');
-  larger.disabled = npFontScale >= NP_FONT_MAX - 1e-6;
-  smaller.disabled = npFontScale <= NP_FONT_MIN + 1e-6;
-  try { localStorage.setItem(NP_FONT_STORAGE, String(npFontScale)); } catch { /* */ }
+function applyPopoverFontScale() {
+  const val = String(popoverFontScale);
+  for (const id of ['note-popover', 'cluster-popover']) {
+    const el = document.getElementById(id);
+    if (el) el.style.setProperty('--np-font-scale', val);
+  }
+  const maxed = popoverFontScale >= NP_FONT_MAX - 1e-6;
+  const mined = popoverFontScale <= NP_FONT_MIN + 1e-6;
+  for (const id of ['np-font-larger', 'cp-font-larger']) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = maxed;
+  }
+  for (const id of ['np-font-smaller', 'cp-font-smaller']) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = mined;
+  }
+  try { localStorage.setItem(POPOVER_FONT_STORAGE, val); } catch { /* */ }
 }
 
-function nudgeNpFontScale(delta) {
-  npFontScale = Math.min(NP_FONT_MAX, Math.max(NP_FONT_MIN, npFontScale + delta));
-  npFontScale = Math.round(npFontScale * 100) / 100;
-  applyNpFontScale();
+function nudgePopoverFontScale(delta) {
+  popoverFontScale = Math.min(NP_FONT_MAX, Math.max(NP_FONT_MIN, popoverFontScale + delta));
+  popoverFontScale = Math.round(popoverFontScale * 100) / 100;
+  applyPopoverFontScale();
+}
+
+function resetPopoverPosition(el) {
+  el.style.left = '';
+  el.style.top = '';
+  el.style.right = '';
+  el.style.transform = '';
 }
 
 function setNotePopoverLayoutMaximized(maximized) {
   notePopoverLayoutMaximized = maximized;
   const el = document.getElementById('note-popover');
   const btn = document.getElementById('np-maximize');
+  resetPopoverPosition(el);
   el.classList.toggle('maximized', maximized);
   btn.setAttribute('aria-pressed', maximized ? 'true' : 'false');
   btn.setAttribute('aria-label', maximized ? 'Restore note panel size' : 'Maximize note panel');
@@ -595,6 +749,70 @@ function setNotePopoverLayoutMaximized(maximized) {
 
 function toggleNotePopoverLayout() {
   setNotePopoverLayoutMaximized(!notePopoverLayoutMaximized);
+}
+
+function setClusterPopoverLayoutMaximized(maximized) {
+  clusterPopoverLayoutMaximized = maximized;
+  const el = document.getElementById('cluster-popover');
+  const btn = document.getElementById('cp-maximize');
+  resetPopoverPosition(el);
+  el.classList.toggle('maximized', maximized);
+  btn.setAttribute('aria-pressed', maximized ? 'true' : 'false');
+  btn.setAttribute('aria-label', maximized ? 'Restore cluster panel size' : 'Maximize cluster panel');
+  btn.title = maximized ? 'Restore previous size' : 'Maximize';
+  btn.textContent = maximized ? '⤡' : '⤢';
+}
+
+function toggleClusterPopoverLayout() {
+  setClusterPopoverLayoutMaximized(!clusterPopoverLayoutMaximized);
+}
+
+function makeDraggable(popover, handle) {
+  if (!popover || !handle) return;
+  let startX = 0, startY = 0, origLeft = 0, origTop = 0, dragging = false;
+
+  function onMove(e) {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const rect = popover.getBoundingClientRect();
+    const minVisible = 80;
+    const maxX = window.innerWidth - minVisible;
+    const minX = minVisible - rect.width;
+    const maxY = window.innerHeight - 40;
+    const newLeft = Math.max(minX, Math.min(maxX, origLeft + dx));
+    const newTop = Math.max(0, Math.min(maxY, origTop + dy));
+    popover.style.left = `${newLeft}px`;
+    popover.style.top = `${newTop}px`;
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    popover.classList.remove('dragging');
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  }
+
+  handle.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, textarea, a')) return;
+    if (popover.classList.contains('maximized')) return;
+    const rect = popover.getBoundingClientRect();
+    origLeft = rect.left;
+    origTop = rect.top;
+    startX = e.clientX;
+    startY = e.clientY;
+    popover.style.left = `${origLeft}px`;
+    popover.style.top = `${origTop}px`;
+    popover.style.right = 'auto';
+    popover.style.transform = 'none';
+    dragging = true;
+    popover.classList.add('dragging');
+    e.preventDefault();
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
 }
 
 function resetNoteDocumentPanel() {
@@ -641,6 +859,7 @@ function openNotePopover(p) {
     readBtn.title = '';
   }
   setNotePopoverLayoutMaximized(false);
+  resetPopoverPosition(el);
   el.classList.add('open');
   notePopoverOpen = true;
   document.getElementById('tooltip').style.display = 'none';
@@ -702,6 +921,108 @@ function closeNotePopover() {
   resetNoteDocumentPanel();
 }
 
+// ── Cluster detail popover ─────────────────────────────────────
+function renderClusterPopover(summary) {
+  document.getElementById('cp-title').textContent = summary.name || `Cluster ${summary.id + 1}`;
+  const subParts = [`${summary.size.toLocaleString()} chunk${summary.size === 1 ? '' : 's'}`];
+  if (typeof summary.coherence === 'number') {
+    subParts.push(`coherence ${(summary.coherence * 100).toFixed(0)}%`);
+  }
+  if (summary.is_noise) subParts.push('unclassified');
+  document.getElementById('cp-sub').innerHTML = subParts.join(' <span class="cp-dot">•</span> ');
+
+  const termsWrap = document.getElementById('cp-terms');
+  const termsSection = document.getElementById('cp-terms-section');
+  termsWrap.innerHTML = '';
+  const terms = Array.isArray(summary.terms) ? summary.terms : [];
+  if (terms.length) {
+    termsSection.style.display = '';
+    terms.forEach(t => {
+      const chip = document.createElement('span');
+      chip.className = 'cp-chip';
+      chip.textContent = t;
+      termsWrap.appendChild(chip);
+    });
+  } else {
+    termsSection.style.display = 'none';
+  }
+
+  const docsWrap = document.getElementById('cp-docs');
+  const docsSection = document.getElementById('cp-docs-section');
+  docsWrap.innerHTML = '';
+  const docs = Array.isArray(summary.top_documents) ? summary.top_documents : [];
+  if (docs.length) {
+    docsSection.style.display = '';
+    docs.forEach(d => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cp-doc';
+      const title = document.createElement('span');
+      title.className = 'cp-doc-title';
+      title.textContent = d.title || 'Untitled';
+      const count = document.createElement('span');
+      count.className = 'cp-doc-count';
+      count.textContent = `${d.count} chunk${d.count === 1 ? '' : 's'}`;
+      btn.appendChild(title);
+      btn.appendChild(count);
+      btn.addEventListener('click', () => {
+        const point = vizData.points.find(p => p.document_id === d.document_id);
+        if (point) {
+          const idx = vizData.points.indexOf(point);
+          focusPoint(idx);
+        }
+      });
+      docsWrap.appendChild(btn);
+    });
+  } else {
+    docsSection.style.display = 'none';
+  }
+
+  const repsWrap = document.getElementById('cp-reps');
+  const repsSection = document.getElementById('cp-reps-section');
+  repsWrap.innerHTML = '';
+  const reps = Array.isArray(summary.representatives) ? summary.representatives : [];
+  if (reps.length) {
+    repsSection.style.display = '';
+    reps.forEach(r => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cp-rep';
+      const title = document.createElement('span');
+      title.className = 'cp-rep-title';
+      title.textContent = r.document_title || 'Untitled';
+      const snippet = document.createElement('span');
+      snippet.className = 'cp-rep-snippet';
+      snippet.textContent = r.snippet || '';
+      btn.appendChild(title);
+      btn.appendChild(snippet);
+      btn.addEventListener('click', () => {
+        const point = vizData.points.find(p => p.id === r.chunk_id);
+        if (point) openNotePopover(point);
+      });
+      repsWrap.appendChild(btn);
+    });
+  } else {
+    repsSection.style.display = 'none';
+  }
+}
+
+function openClusterPopover(clusterId) {
+  const summary = clusterSummary(clusterId);
+  if (!summary) return;
+  renderClusterPopover(summary);
+  const el = document.getElementById('cluster-popover');
+  setClusterPopoverLayoutMaximized(false);
+  resetPopoverPosition(el);
+  el.classList.add('open');
+}
+
+function closeClusterPopover() {
+  const el = document.getElementById('cluster-popover');
+  el.classList.remove('open');
+  setClusterPopoverLayoutMaximized(false);
+}
+
 // ── Hover tooltip ──────────────────────────────────────────────
 function setupHover(points) {
   const raycaster = new THREE.Raycaster();
@@ -725,11 +1046,25 @@ function setupHover(points) {
   });
 
   document.getElementById('np-close').addEventListener('click', () => closeNotePopover());
+  document.getElementById('cp-close').addEventListener('click', () => {
+    closeClusterPopover();
+    activeClusterId = null;
+    updateLegendState();
+    applyPointStyling();
+  });
 
   window.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && notePopoverOpen) {
-      e.preventDefault();
-      closeNotePopover();
+    if (e.key === 'Escape') {
+      if (notePopoverOpen) {
+        e.preventDefault();
+        closeNotePopover();
+      } else if (activeClusterId !== null) {
+        e.preventDefault();
+        closeClusterPopover();
+        activeClusterId = null;
+        updateLegendState();
+        applyPointStyling();
+      }
     }
   });
 
