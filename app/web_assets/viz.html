@@ -97,7 +97,10 @@
       --np-font-scale: 1;
       position: fixed; left: 264px; top: 50%; transform: translateY(-50%);
       width: min(360px, calc(100vw - 32px - 248px));
-      max-height: min(80vh, 640px);
+      min-width: 240px; min-height: 180px;
+      max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 32px);
+      resize: both; overflow: hidden;
       display: none; flex-direction: column; z-index: 35;
       background: rgba(10, 10, 24, 0.97);
       border: 1px solid rgba(158, 207, 184, 0.38);
@@ -109,8 +112,9 @@
     #cluster-popover.open { display: flex; }
     #cluster-popover.maximized {
       left: 264px !important; right: 16px !important; top: 16px !important; bottom: 16px !important;
-      width: auto;
-      max-height: none;
+      width: auto !important; height: auto !important;
+      max-height: none !important;
+      resize: none !important;
       transform: none !important;
     }
     .cp-head {
@@ -174,7 +178,10 @@
       --np-font-scale: 1;
       position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
       width: min(420px, calc(100vw - 32px - 248px));
-      max-height: min(80vh, 640px);
+      min-width: 260px; min-height: 200px;
+      max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 32px);
+      resize: both; overflow: hidden;
       display: none; flex-direction: column; z-index: 40;
       background: rgba(10, 10, 24, 0.98);
       border: 1px solid rgba(158, 207, 184, 0.38);
@@ -186,8 +193,9 @@
     #note-popover.open { display: flex; }
     #note-popover.maximized {
       right: 16px !important; left: 264px !important; top: 16px !important; bottom: 16px !important;
-      width: auto;
-      max-height: none;
+      width: auto !important; height: auto !important;
+      max-height: none !important;
+      resize: none !important;
       transform: none !important;
     }
     .note-popover-head {
@@ -200,6 +208,26 @@
     #note-popover.dragging, #cluster-popover.dragging { box-shadow: 0 20px 60px rgba(0,0,0,0.7); }
     #note-popover.maximized .note-popover-head,
     #cluster-popover.maximized .cp-head { cursor: default; }
+
+    /* Resize-corner affordance — pure decoration; the native handle beneath
+       it is what actually resizes. */
+    #note-popover::after, #cluster-popover::after {
+      content: '';
+      position: absolute;
+      right: 3px; bottom: 3px;
+      width: 14px; height: 14px;
+      background:
+        linear-gradient(135deg,
+          transparent 0%, transparent 35%,
+          rgba(158, 207, 184, 0.55) 35%, rgba(158, 207, 184, 0.55) 48%,
+          transparent 48%, transparent 63%,
+          rgba(158, 207, 184, 0.55) 63%, rgba(158, 207, 184, 0.55) 76%,
+          transparent 76%);
+      pointer-events: none;
+      border-bottom-right-radius: 7px;
+      opacity: 0.75;
+    }
+    #note-popover.maximized::after, #cluster-popover.maximized::after { display: none; }
     .note-popover-title { font-size: 1.128em; color: #fff; font-weight: normal; min-width: 0; }
     .note-popover-actions { display: flex; align-items: flex-start; gap: 4px; flex-shrink: 0; }
     .note-popover-icon-btn, .note-popover-close {
@@ -956,12 +984,37 @@ function resetPopoverPosition(el) {
   el.style.transform = '';
 }
 
+function resetPopoverSize(el) {
+  el.style.width = '';
+  el.style.height = '';
+}
+
+// After showing, convert CSS-default positioning (`right: …; top: 50%;
+// transform: translateY(-50%)`) into absolute `left/top` pixel values. The
+// native `resize: both` corner handle only behaves intuitively when the
+// popover is left/top-anchored — otherwise grabbing the corner moves the
+// wrong edge.
+function anchorPopoverAbsolutely(el) {
+  if (!el || el.classList.contains('maximized')) return;
+  const rect = el.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const margin = 8;
+  const left = Math.max(margin, Math.min(window.innerWidth - rect.width - margin, rect.left));
+  const top = Math.max(margin, Math.min(window.innerHeight - rect.height - margin, rect.top));
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.style.right = 'auto';
+  el.style.transform = 'none';
+}
+
 function setNotePopoverLayoutMaximized(maximized) {
   notePopoverLayoutMaximized = maximized;
   const el = document.getElementById('note-popover');
   const btn = document.getElementById('np-maximize');
   resetPopoverPosition(el);
+  resetPopoverSize(el);
   el.classList.toggle('maximized', maximized);
+  if (!maximized && el.classList.contains('open')) anchorPopoverAbsolutely(el);
   btn.setAttribute('aria-pressed', maximized ? 'true' : 'false');
   btn.setAttribute('aria-label', maximized ? 'Restore note panel size' : 'Maximize note panel');
   btn.title = maximized ? 'Restore previous size' : 'Maximize';
@@ -977,7 +1030,9 @@ function setClusterPopoverLayoutMaximized(maximized) {
   const el = document.getElementById('cluster-popover');
   const btn = document.getElementById('cp-maximize');
   resetPopoverPosition(el);
+  resetPopoverSize(el);
   el.classList.toggle('maximized', maximized);
+  if (!maximized && el.classList.contains('open')) anchorPopoverAbsolutely(el);
   btn.setAttribute('aria-pressed', maximized ? 'true' : 'false');
   btn.setAttribute('aria-label', maximized ? 'Restore cluster panel size' : 'Maximize cluster panel');
   btn.title = maximized ? 'Restore previous size' : 'Maximize';
@@ -1081,7 +1136,9 @@ function openNotePopover(p) {
   }
   setNotePopoverLayoutMaximized(false);
   resetPopoverPosition(el);
+  resetPopoverSize(el);
   el.classList.add('open');
+  anchorPopoverAbsolutely(el);
   notePopoverOpen = true;
   document.getElementById('tooltip').style.display = 'none';
 }
@@ -1235,7 +1292,9 @@ function openClusterPopover(clusterId) {
   const el = document.getElementById('cluster-popover');
   setClusterPopoverLayoutMaximized(false);
   resetPopoverPosition(el);
+  resetPopoverSize(el);
   el.classList.add('open');
+  anchorPopoverAbsolutely(el);
 }
 
 function closeClusterPopover() {
