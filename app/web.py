@@ -104,6 +104,83 @@ _VIZ_CAPITALIZED_PHRASE = re.compile(
 )
 _VIZ_LABEL_STOP_NORMALIZED = frozenset({"text", "notes", "untitled"})
 
+# Order for picking a single ``top_concept`` per chunk (earlier = higher priority).
+VIZ_CONCEPT_METHOD_PRIORITY: tuple[str, ...] = (
+    "wikilink",
+    "alias",
+    "tag",
+    "definition",
+    "inline_tag",
+    "emphasis",
+    "body_phrase",
+    "heading",
+)
+_VIZ_METHOD_PRIORITY_INDEX: dict[str, int] = {m: i for i, m in enumerate(VIZ_CONCEPT_METHOD_PRIORITY)}
+
+
+def _load_chunk_concept_mentions(
+    conn: sqlite3.Connection, chunk_ids: list[int]
+) -> dict[int, list[sqlite3.Row]]:
+    if not chunk_ids:
+        return {}
+    placeholders = ",".join("?" for _ in chunk_ids)
+    rows = conn.execute(
+        f"""
+        SELECT em.chunk_id, em.extraction_method, em.entity_id,
+               e.canonical_name, e.mention_count
+        FROM entity_mentions em
+        JOIN entities e ON e.id = em.entity_id
+        WHERE em.chunk_id IN ({placeholders})
+          AND (e.entity_type IS NULL OR e.entity_type = 'concept')
+        """,
+        chunk_ids,
+    ).fetchall()
+    by_chunk: dict[int, list[sqlite3.Row]] = {}
+    for row in rows:
+        cid = int(row["chunk_id"])
+        by_chunk.setdefault(cid, []).append(row)
+    return by_chunk
+
+
+def _viz_top_concept_payload(mentions: list[sqlite3.Row]) -> dict[str, object] | None:
+    if not mentions:
+        return None
+    best = min(
+        mentions,
+        key=lambda r: (
+            _VIZ_METHOD_PRIORITY_INDEX.get(str(r["extraction_method"]), 1000),
+            -int(r["mention_count"] or 0),
+        ),
+    )
+    return {
+        "id": int(best["entity_id"]),
+        "canonical_name": str(best["canonical_name"]),
+        "method": str(best["extraction_method"]),
+    }
+
+
+def _cluster_name_from_chunk_concepts(
+    chunk_ids: list[int],
+    by_chunk: dict[int, list[sqlite3.Row]],
+    fallback_rows: list[sqlite3.Row],
+) -> dict[str, object]:
+    counter: Counter[str] = Counter()
+    for cid in chunk_ids:
+        for row in by_chunk.get(cid, []):
+            counter[str(row["canonical_name"])] += 1
+    if not counter:
+        return _cluster_name_from_rows(fallback_rows)
+    chosen = [name for name, count in counter.most_common(5) if count >= 2]
+    if not chosen:
+        chosen = [name for name, _ in counter.most_common(2)]
+    if not chosen:
+        return _cluster_name_from_rows(fallback_rows)
+    return {
+        "name": " / ".join(chosen[:2]),
+        "terms": chosen[:5],
+        "size": len(fallback_rows),
+    }
+
 
 def _cluster_name_from_rows(rows: list[sqlite3.Row]) -> dict[str, object]:
     phrases: Counter[str] = Counter()
@@ -167,6 +244,9 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     if not rows:
         return {"points": [], "edges": [], "n_clusters": 0, "clusters": [], "variance_explained": []}
 
+    chunk_ids = [int(r["id"]) for r in rows]
+    concept_by_chunk = _load_chunk_concept_mentions(conn, chunk_ids)
+
     vectors = np.array([json.loads(r["vector_json"]) for r in rows], dtype=np.float32)
 
     # PCA to 3D
@@ -198,8 +278,10 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
         for j in neighbors[1:]:
             edge_set.add((min(i, int(j)), max(i, int(j))))
 
-    points = [
-        {
+    points: list[dict[str, object]] = []
+    for i, r in enumerate(rows):
+        cid = int(r["id"])
+        payload: dict[str, object] = {
             "id": r["id"],
             "document_id": r["document_id"],
             "source_path": r["source_path"],
@@ -211,15 +293,23 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
             "section_title": r["section_title"],
             "snippet": _truncate(r["text"]),
         }
-        for i, r in enumerate(rows)
-    ]
+        top = _viz_top_concept_payload(concept_by_chunk.get(cid, []))
+        if top:
+            payload["top_concept"] = top
+        points.append(payload)
     cluster_rows: dict[int, list[sqlite3.Row]] = {cluster_id: [] for cluster_id in range(n_clusters)}
     for i, row in enumerate(rows):
         cluster_rows[cluster_ids[i]].append(row)
-    clusters = [
-        {"id": cluster_id, **_cluster_name_from_rows(cluster_rows[cluster_id])}
-        for cluster_id in range(n_clusters)
-    ]
+    clusters = []
+    for cluster_id in range(n_clusters):
+        cluster_row_list = cluster_rows[cluster_id]
+        c_ids = [int(r["id"]) for r in cluster_row_list]
+        clusters.append(
+            {
+                "id": cluster_id,
+                **_cluster_name_from_chunk_concepts(c_ids, concept_by_chunk, cluster_row_list),
+            }
+        )
 
     return {
         "points": points,

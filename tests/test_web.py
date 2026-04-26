@@ -64,7 +64,7 @@ def test_web_assets_are_split_and_linked() -> None:
     assert "section.hidden = !views.includes(name)" in js
     assert ".sidebar-section[hidden]" in css
     assert 'id="viz-search"' in viz_html
-    assert 'id="label-lines"' in viz_html
+    assert 'displayConceptTitle' in viz_html
     assert 'id="np-maximize"' in viz_html
     assert 'id="np-font-larger"' in viz_html
     assert 'id="np-font-smaller"' in viz_html
@@ -80,6 +80,7 @@ def test_viz_api_returns_named_clusters(connection, fixture_vault: Path, setting
     assert payload["points"]
     assert payload["points"][0]["document_id"] >= 1
     assert payload["points"][0]["source_path"]
+    assert any(p.get("top_concept") for p in payload["points"])
     assert payload["clusters"]
     assert payload["clusters"][0]["name"]
     assert payload["clusters"][0]["size"] > 0
