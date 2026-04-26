@@ -8,7 +8,14 @@ from typing import Iterable
 from app.config import Settings
 from app.models import ChunkRecord, ParsedDocument
 from app.processing.chunker import chunk_document
-from app.processing.concepts import ConceptMention, entity_type_from_recorded_methods, extract_concept_mentions
+from app.processing.concepts import (
+    ConceptMention,
+    entity_type_from_recorded_methods,
+    extract_concept_mentions,
+    fold_plural_key,
+    is_acronym_source,
+    normalize_key,
+)
 from app.processing.embeddings import embed_texts
 from app.util.hashing import sha256_text
 from app.util.logging import get_logger
@@ -180,6 +187,23 @@ def _insert_chunks(connection: sqlite3.Connection, document_id: int, title: str,
     return chunk_ids
 
 
+def _existing_entity_normalized_keys(connection: sqlite3.Connection) -> frozenset[str]:
+    rows = connection.execute(
+        "SELECT normalized_key FROM entities WHERE normalized_key IS NOT NULL AND normalized_key != ''"
+    ).fetchall()
+    return frozenset(str(r["normalized_key"]) for r in rows)
+
+
+def _richer_canonical(existing: str, new: str) -> str:
+    if not existing:
+        return new
+    if not new:
+        return existing
+    score_existing = (len(existing), sum(1 for c in existing if c.isupper()))
+    score_new = (len(new), sum(1 for c in new if c.isupper()))
+    return existing if score_existing >= score_new else new
+
+
 def _upsert_entity(connection: sqlite3.Connection, mention: ConceptMention) -> int:
     now = utc_now_iso()
     row = connection.execute(
@@ -196,10 +220,11 @@ def _upsert_entity(connection: sqlite3.Connection, mention: ConceptMention) -> i
         )
         return int(cursor.lastrowid)
     entity_id = int(row["id"])
-    if not row["canonical_name"] and mention.canonical_name:
+    merged = _richer_canonical(str(row["canonical_name"] or ""), mention.canonical_name)
+    if merged != row["canonical_name"]:
         connection.execute(
             "UPDATE entities SET canonical_name = ?, updated_at = ? WHERE id = ?",
-            (mention.canonical_name, now, entity_id),
+            (merged, now, entity_id),
         )
     if row["entity_type"] != "concept" and mention.entity_type == "concept":
         connection.execute(
@@ -301,7 +326,9 @@ def _ingest_single_document(
     chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
     if chunk_ids:
         _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
-        mentions = extract_concept_mentions(parsed, chunks)
+        mentions = extract_concept_mentions(
+            parsed, chunks, existing_normalized_keys=_existing_entity_normalized_keys(connection)
+        )
         _insert_concept_mentions(connection, chunk_ids, mentions)
     LOGGER.info("Indexed %s with %d chunks", path, len(chunk_ids))
     return "indexed", document_id, warnings
@@ -396,7 +423,7 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
                 chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
                 if chunk_ids:
                     _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
-                    mentions = extract_concept_mentions(parsed, chunks)
+                    mentions = extract_concept_mentions(parsed, chunks, existing_normalized_keys=frozenset())
                     _insert_concept_mentions(connection, chunk_ids, mentions)
                 indexed += 1
                 changed_document_ids.append(document_id)
@@ -430,11 +457,69 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
     }
 
 
-def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
-    """Recompute ``entity_type`` from canonical names and recorded extraction methods.
+def _merge_and_rekey_entities(connection: sqlite3.Connection) -> dict[str, int]:
+    """Collapse entities that share the same post-normalization key; reattach mentions."""
+    rows = list(
+        connection.execute(
+            "SELECT id, canonical_name, normalized_key, entity_type FROM entities ORDER BY id"
+        ).fetchall()
+    )
+    if not rows:
+        return {"entities_merged": 0, "entities_rekeyed": 0}
+    cores = [normalize_key(str(r["canonical_name"] or "")) for r in rows]
+    pool = set(cores)
+    groups: dict[str, list[tuple[int, str, str | None]]] = {}
+    for r, core in zip(rows, cores):
+        canon = str(r["canonical_name"] or "")
+        final = fold_plural_key(
+            core,
+            pool,
+            source_is_acronym=is_acronym_source(canon),
+        )
+        groups.setdefault(final, []).append((int(r["id"]), canon, r["entity_type"]))
+    now = utc_now_iso()
+    merged = 0
+    rekeyed = 0
+    for final_key, members in groups.items():
+        members.sort(key=lambda t: t[0])
+        if len(members) == 1:
+            eid = members[0][0]
+            current = connection.execute(
+                "SELECT normalized_key FROM entities WHERE id = ?", (eid,)
+            ).fetchone()
+            if current and str(current["normalized_key"]) != final_key:
+                connection.execute(
+                    "UPDATE entities SET normalized_key = ?, updated_at = ? WHERE id = ?",
+                    (final_key, now, eid),
+                )
+                rekeyed += 1
+            continue
+        survivor_id = members[0][0]
+        survivor_canon = members[0][1]
+        for _, canon, _ in members[1:]:
+            survivor_canon = _richer_canonical(survivor_canon, canon)
+        ets = [et for _, _, et in members]
+        survivor_type = "concept" if any(et is None or et == "concept" for et in ets) else "structure"
+        for loser_id, _, _ in members[1:]:
+            connection.execute(
+                "UPDATE entity_mentions SET entity_id = ? WHERE entity_id = ?",
+                (survivor_id, loser_id),
+            )
+            connection.execute("DELETE FROM entities WHERE id = ?", (loser_id,))
+            merged += 1
+        connection.execute(
+            """
+            UPDATE entities
+            SET canonical_name = ?, normalized_key = ?, entity_type = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (survivor_canon, final_key, survivor_type, now, survivor_id),
+        )
+    return {"entities_merged": merged, "entities_rekeyed": rekeyed}
 
-    Does not delete or rewrite ``entity_mentions`` rows.
-    """
+
+def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
+    """Recompute ``entity_type``, re-key rows, and merge duplicates after normalization."""
     rows = connection.execute(
         """
         SELECT e.id, e.canonical_name, e.entity_type,
@@ -458,6 +543,8 @@ def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
                 (new_type, now, int(row["id"])),
             )
             updated += 1
+    merge_stats = _merge_and_rekey_entities(connection)
+    _refresh_entity_mention_counts(connection)
     connection.commit()
     mention_count = int(connection.execute("SELECT COUNT(*) AS c FROM entity_mentions").fetchone()["c"])
     entity_count = int(connection.execute("SELECT COUNT(*) AS c FROM entities").fetchone()["c"])
@@ -466,6 +553,7 @@ def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
         "entities_updated": updated,
         "entity_mentions": mention_count,
         "entities": entity_count,
+        **merge_stats,
     }
 
 
@@ -488,6 +576,7 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
 
     indexed_documents = 0
     total_mentions = 0
+    known_keys: set[str] = set()
     for row in rows:
         document_id = int(row["document_id"])
         chunk_rows = connection.execute(
@@ -531,8 +620,11 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
             tags=tags,
             aliases=aliases,
         )
-        mentions = extract_concept_mentions(parsed, chunk_records)
+        mentions = extract_concept_mentions(
+            parsed, chunk_records, existing_normalized_keys=frozenset(known_keys)
+        )
         total_mentions += _insert_concept_mentions(connection, chunk_ids, mentions)
+        known_keys.update(m.normalized_key for m in mentions)
         indexed_documents += 1
 
     _refresh_entity_mention_counts(connection)

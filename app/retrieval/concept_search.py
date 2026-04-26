@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from app.processing.concepts import normalize_key
+from app.processing.concepts import normalize_key, normalized_key_is_stopword_only
 from app.retrieval.sources import build_markdown_ref, build_source_ref
 
 STRONG_CONCEPT_METHODS = {"wikilink", "tag", "alias", "definition", "inline_tag"}
@@ -36,7 +36,7 @@ def _candidate_keys(terms: list[str]) -> set[str]:
         for term in normalized_terms[start:]:
             parts.append(term)
             keys.add(normalize_key(" ".join(parts)))
-    return keys
+    return {k for k in keys if k and not normalized_key_is_stopword_only(k)}
 
 
 def list_concepts(

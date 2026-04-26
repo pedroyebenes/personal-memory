@@ -227,7 +227,7 @@ def test_concepts_list_command_can_show_structures(
     main()
 
     payload = json.loads(capsys.readouterr().out)
-    assert any(item["normalized_key"] == "capítulo xl" for item in payload["concepts"])
+    assert any(item["normalized_key"] == "capitulo xl" for item in payload["concepts"])
 
 
 def test_concepts_noise_report_command(

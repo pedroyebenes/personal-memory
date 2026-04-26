@@ -52,6 +52,8 @@ def test_normalize_key_collapses_case_and_separators() -> None:
     assert normalize_key("Project_North-Star") == "project north star"
     assert normalize_key("  Multi  Space  ") == "multi space"
     assert normalize_key("UPPER") == "upper"
+    assert normalize_key("México") == normalize_key("Mexico")
+    assert normalize_key("Don Quijote's") == normalize_key("Don Quijote")
 
 
 def test_classify_entity_type_splits_structures_from_concepts() -> None:
@@ -152,7 +154,7 @@ def test_extract_concept_mentions_splits_structural_alias_from_title(tmp_path: P
     by_key_method = {(m.normalized_key, m.extraction_method): m.entity_type for m in mentions}
 
     assert by_key_method[("el quijote", "title")] == "concept"
-    assert by_key_method[("capítulo i", "alias")] == "structure"
+    assert by_key_method[("capitulo i", "alias")] == "structure"
     assert by_key_method[("el quijote", "alias")] == "concept"
 
 
@@ -167,7 +169,7 @@ def test_extract_concept_mentions_marks_structural_headings(tmp_path: Path) -> N
     by_key = {mention.normalized_key: mention.entity_type for mention in mentions}
 
     assert by_key["2026 04 20"] == "structure"
-    assert by_key["capítulo xl"] == "structure"
+    assert by_key["capitulo xl"] == "structure"
     assert by_key["research agenda"] == "concept"
 
 
@@ -251,7 +253,7 @@ def test_body_text_extraction_filters_structures_and_stopwords(tmp_path: Path) -
         if mention.extraction_method in {"body_phrase", "emphasis", "definition"}
     }
 
-    assert "capítulo xl" not in body_keys
+    assert "capitulo xl" not in body_keys
     assert "the" not in body_keys
 
 
@@ -474,9 +476,9 @@ def test_list_concepts_defaults_to_semantic_concepts(connection, tmp_path: Path,
     all_items = list_concepts(connection, entity_type=None, limit=100)
 
     assert all(item["entity_type"] == "concept" for item in default_items)
-    assert "capítulo xl" not in {item["normalized_key"] for item in default_items}
-    assert "capítulo xl" in {item["normalized_key"] for item in structure_items}
-    assert "capítulo xl" in {item["normalized_key"] for item in all_items}
+    assert "capitulo xl" not in {item["normalized_key"] for item in default_items}
+    assert "capitulo xl" in {item["normalized_key"] for item in structure_items}
+    assert "capitulo xl" in {item["normalized_key"] for item in all_items}
 
 
 def test_get_concept_detail_returns_chunk_provenance(connection, fixture_vault: Path, settings: Settings) -> None:
@@ -641,6 +643,7 @@ def test_reclassify_entities_is_idempotent_and_preserves_mentions(
 
     second = reclassify_entities(connection)
     assert second["entities_updated"] == 0
+    assert second.get("entities_merged", 0) == 0
 
     mentions_after = connection.execute(
         "SELECT entity_id, chunk_id, mention_text, extraction_method FROM entity_mentions ORDER BY id"

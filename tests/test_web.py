@@ -524,10 +524,10 @@ def test_concepts_api_filters_by_entity_type(connection, tmp_path: Path, setting
 
     assert int(status) == 200
     assert concepts["type"] == "concept"
-    assert "capítulo xl" not in {item["normalized_key"] for item in concepts["concepts"]}
+    assert "capitulo xl" not in {item["normalized_key"] for item in concepts["concepts"]}
     assert int(status_structures) == 200
     assert structures["type"] == "structure"
-    assert "capítulo xl" in {item["normalized_key"] for item in structures["concepts"]}
+    assert "capitulo xl" in {item["normalized_key"] for item in structures["concepts"]}
 
 
 def test_concepts_api_filters_by_method_and_quality(connection, fixture_vault: Path, settings: Settings) -> None:

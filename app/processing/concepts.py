@@ -17,7 +17,8 @@ to the chunk where they appear.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from app.models import ChunkRecord, ParsedDocument
@@ -71,6 +72,9 @@ _BODY_STOP_PHRASES = {
     "all rights reserved",
     "public domain",
 }
+
+# Keys that are only stopword tokens never participate in concept boosting.
+NORMALIZED_KEY_STOPWORDS: frozenset[str] = frozenset(_BODY_STOPWORDS)
 
 _MONTH_NAMES_EN_ES = (
     "january|february|march|april|may|june|july|august|september|october|november|december|"
@@ -148,16 +152,87 @@ class ConceptMention:
     chunk_index: int
 
 
-def normalize_key(value: str) -> str:
-    cleaned = value.replace("_", " ").replace("-", " ")
+def _strip_combining_marks(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+
+
+def _normalize_key_for_structure_match(value: str) -> str:
+    """Lowercase spacing normalization only (keep accents for structural regexes)."""
+    cleaned = value.replace("'", "'").replace("'", "'")
+    cleaned = cleaned.replace("_", " ").replace("-", " ")
     cleaned = _WHITESPACE.sub(" ", cleaned).strip().lower()
     return cleaned
+
+
+def normalize_key(value: str) -> str:
+    """Lowercase entity key with NFKD fold, combining-mark strip, and light cleanup."""
+    cleaned = _normalize_key_for_structure_match(value)
+    cleaned = _strip_combining_marks(cleaned)
+    cleaned = _WHITESPACE.sub(" ", cleaned).strip()
+    if " " in cleaned and cleaned.endswith("'s"):
+        cleaned = cleaned[:-2].rstrip()
+    cleaned = _WHITESPACE.sub(" ", cleaned).strip()
+    return cleaned
+
+
+def is_acronym_source(value: str) -> bool:
+    """True when the surface form looks like an acronym (skip plural folding)."""
+    s = value.strip()
+    if len(s) < 2 or not any(c.isalpha() for c in s):
+        return False
+    if s.isupper():
+        return True
+    words = [w for w in re.split(r"\s+", s) if any(c.isalpha() for c in w)]
+    return bool(words) and all(w.isupper() for w in words)
+
+
+def fold_plural_key(key: str, pool: set[str], *, source_is_acronym: bool) -> str:
+    """If ``key`` is a plural of a base already in ``pool``, return the base (single-token only)."""
+    if source_is_acronym or not key:
+        return key
+    if key in NORMALIZED_KEY_STOPWORDS:
+        return key
+    words = key.split()
+    if len(words) != 1 or len(key) < 4:
+        return key
+    for suffix in ("es", "s"):
+        if not key.endswith(suffix):
+            continue
+        base = key[: -len(suffix)]
+        if len(base) < 4 or base in NORMALIZED_KEY_STOPWORDS:
+            continue
+        if base in pool:
+            return base
+    return key
+
+
+def apply_key_pool_folding(mentions: list[ConceptMention], pool: set[str]) -> list[ConceptMention]:
+    """Apply :func:`fold_plural_key` using ``pool`` ∪ mention keys (core keys already on mentions)."""
+    combined = pool | {m.normalized_key for m in mentions}
+    return [
+        replace(
+            m,
+            normalized_key=fold_plural_key(
+                m.normalized_key,
+                combined,
+                source_is_acronym=is_acronym_source(m.canonical_name),
+            ),
+        )
+        for m in mentions
+    ]
+
+
+def normalized_key_is_stopword_only(key: str) -> bool:
+    if not key:
+        return True
+    return all(part in NORMALIZED_KEY_STOPWORDS for part in key.split())
 
 
 def classify_entity_type(value: str, method: str) -> str:
     if method not in _STRUCTURAL_METHODS:
         return "concept"
-    key = normalize_key(value)
+    key = _normalize_key_for_structure_match(value)
     if any(pattern.match(key) for pattern in _STRUCTURAL_LABEL_PATTERNS):
         return "structure"
     return "concept"
@@ -325,7 +400,12 @@ def _extract_headings(chunks: list[ChunkRecord]) -> list[ConceptMention]:
     return mentions
 
 
-def extract_concept_mentions(parsed: ParsedDocument, chunks: list[ChunkRecord]) -> list[ConceptMention]:
+def extract_concept_mentions(
+    parsed: ParsedDocument,
+    chunks: list[ChunkRecord],
+    *,
+    existing_normalized_keys: frozenset[str] | None = None,
+) -> list[ConceptMention]:
     if not chunks:
         return []
     first_chunk_index = 0
@@ -375,4 +455,5 @@ def extract_concept_mentions(parsed: ParsedDocument, chunks: list[ChunkRecord]) 
     mentions.extend(_extract_emphasis(chunks))
     mentions.extend(_extract_definitions(chunks))
     mentions.extend(_extract_body_phrases(chunks))
-    return mentions
+    seed = set(existing_normalized_keys or ())
+    return apply_key_pool_folding(mentions, seed)
