@@ -5,6 +5,16 @@ import re
 from app.models import ChunkRecord
 
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$", re.MULTILINE)
+
+
+def breadcrumb_text(document_title: str, heading_path: list[str], chunk_text: str) -> str:
+    """Text passed to the embedding model: title, heading trail, then raw chunk body."""
+    doc = (document_title or "").strip() or "Untitled"
+    body = chunk_text
+    if heading_path:
+        trail = " > ".join(heading_path)
+        return f"{doc}\n> {trail}\n\n{body}"
+    return f"{doc}\n\n{body}"
 FENCE_PATTERN = re.compile(r"^\s*(```|~~~)")
 LIST_PATTERN = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
 CALLOUT_PATTERN = re.compile(r"^\s*>\s*(?:\[[!A-Za-z]+[^\]]*\])?")
@@ -85,29 +95,38 @@ def _split_markdown_blocks(text: str) -> list[str]:
     return blocks
 
 
-def _build_sections(text: str) -> list[tuple[str | None, str, int]]:
+def _build_sections(text: str) -> list[tuple[str | None, str, int, list[str]]]:
     matches = list(HEADING_PATTERN.finditer(text))
     if not matches:
-        return [(None, text.strip(), 0)] if text.strip() else []
+        stripped = text.strip()
+        return [(None, stripped, 0, [])] if stripped else []
 
-    sections: list[tuple[str | None, str, int]] = []
+    sections: list[tuple[str | None, str, int, list[str]]] = []
+    stack: list[tuple[int, str]] = []
+
     if matches[0].start() > 0:
-        preamble = text[:matches[0].start()].strip()
+        preamble = text[: matches[0].start()].strip()
         if preamble:
-            sections.append((None, preamble, 0))
+            sections.append((None, preamble, 0, []))
 
     for index, match in enumerate(matches):
+        level = len(match.group(1))
         title = match.group(2).strip()
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        stack.append((level, title))
+        heading_path = [t for _, t in stack]
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         body = text[start:end].strip()
         section_text = f"{title}\n\n{body}".strip() if body else title
-        sections.append((title, section_text, match.start()))
+        sections.append((title, section_text, match.start(), heading_path))
     return sections
 
 
 def _split_large_section(
     section_title: str | None,
+    heading_path: list[str],
     text: str,
     start_offset: int,
     max_words: int,
@@ -136,6 +155,7 @@ def _split_large_section(
                         token_estimate=_estimate_tokens(chunk_text),
                         char_start=chunk_start,
                         char_end=chunk_start + len(chunk_text),
+                        heading_path=list(heading_path),
                     )
                 )
                 current = []
@@ -149,6 +169,7 @@ def _split_large_section(
                     token_estimate=_estimate_tokens(block),
                     char_start=running_offset,
                     char_end=running_offset + len(block),
+                    heading_path=list(heading_path),
                 )
             )
             running_offset += len(block) + 2
@@ -165,6 +186,7 @@ def _split_large_section(
                     token_estimate=_estimate_tokens(chunk_text),
                     char_start=chunk_start,
                     char_end=chunk_start + len(chunk_text),
+                    heading_path=list(heading_path),
                 )
             )
             overlap = current[-overlap_paragraphs:] if overlap_paragraphs > 0 else []
@@ -186,6 +208,7 @@ def _split_large_section(
                 token_estimate=_estimate_tokens(chunk_text),
                 char_start=chunk_start,
                 char_end=chunk_start + len(chunk_text),
+                heading_path=list(heading_path),
             )
         )
     return chunks
@@ -193,6 +216,12 @@ def _split_large_section(
 
 def _combine_chunks(first: ChunkRecord, second: ChunkRecord) -> ChunkRecord:
     combined_text = f"{first.text}\n\n{second.text}".strip()
+    if first.heading_path == second.heading_path:
+        path = first.heading_path
+    elif len(second.heading_path) >= len(first.heading_path):
+        path = second.heading_path
+    else:
+        path = first.heading_path
     return ChunkRecord(
         chunk_index=first.chunk_index,
         section_title=first.section_title or second.section_title,
@@ -200,6 +229,7 @@ def _combine_chunks(first: ChunkRecord, second: ChunkRecord) -> ChunkRecord:
         token_estimate=_estimate_tokens(combined_text),
         char_start=first.char_start,
         char_end=second.char_end,
+        heading_path=list(path),
     )
 
 
@@ -212,7 +242,7 @@ def chunk_document(
     sections = _build_sections(text)
     raw_chunks: list[ChunkRecord] = []
 
-    for section_title, section_text, offset in sections:
+    for section_title, section_text, offset, heading_path in sections:
         words = len(section_text.split())
         if words <= target_max_words:
             raw_chunks.append(
@@ -223,11 +253,19 @@ def chunk_document(
                     token_estimate=_estimate_tokens(section_text),
                     char_start=offset,
                     char_end=offset + len(section_text),
+                    heading_path=list(heading_path),
                 )
             )
         else:
             raw_chunks.extend(
-                _split_large_section(section_title, section_text, offset, target_max_words, overlap_paragraphs)
+                _split_large_section(
+                    section_title,
+                    heading_path,
+                    section_text,
+                    offset,
+                    target_max_words,
+                    overlap_paragraphs,
+                )
             )
 
     merged_chunks: list[ChunkRecord] = []

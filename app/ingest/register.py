@@ -7,7 +7,7 @@ from typing import Iterable
 
 from app.config import Settings
 from app.models import ChunkRecord, ParsedDocument
-from app.processing.chunker import chunk_document
+from app.processing.chunker import breadcrumb_text, chunk_document
 from app.processing.concepts import (
     ConceptMention,
     entity_type_from_recorded_methods,
@@ -158,16 +158,17 @@ def _insert_chunks(connection: sqlite3.Connection, document_id: int, title: str,
         cursor = connection.execute(
             """
             INSERT INTO chunks (
-                document_id, chunk_index, section_title, text, token_estimate,
-                char_start, char_end, created_at
+                document_id, chunk_index, section_title, text, heading_path_json,
+                token_estimate, char_start, char_end, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 document_id,
                 chunk.chunk_index,
                 chunk.section_title,
                 chunk.text,
+                json.dumps(chunk.heading_path, ensure_ascii=False),
                 chunk.token_estimate,
                 chunk.char_start,
                 chunk.char_end,
@@ -325,7 +326,12 @@ def _ingest_single_document(
     chunks = chunk_document(parsed.normalized_text)
     chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
     if chunk_ids:
-        _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
+        _insert_embeddings(
+            connection,
+            chunk_ids,
+            [breadcrumb_text(parsed.title, ch.heading_path, ch.text) for ch in chunks],
+            settings,
+        )
         mentions = extract_concept_mentions(
             parsed, chunks, existing_normalized_keys=_existing_entity_normalized_keys(connection)
         )
@@ -422,7 +428,12 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
                 chunks = chunk_document(parsed.normalized_text)
                 chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
                 if chunk_ids:
-                    _insert_embeddings(connection, chunk_ids, [chunk.text for chunk in chunks], settings)
+                    _insert_embeddings(
+                        connection,
+                        chunk_ids,
+                        [breadcrumb_text(parsed.title, ch.heading_path, ch.text) for ch in chunks],
+                        settings,
+                    )
                     mentions = extract_concept_mentions(parsed, chunks, existing_normalized_keys=frozenset())
                     _insert_concept_mentions(connection, chunk_ids, mentions)
                 indexed += 1
@@ -581,7 +592,7 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
         document_id = int(row["document_id"])
         chunk_rows = connection.execute(
             """
-            SELECT id, chunk_index, section_title, text
+            SELECT id, chunk_index, section_title, text, heading_path_json
             FROM chunks WHERE document_id = ? ORDER BY chunk_index
             """,
             (document_id,),
@@ -589,17 +600,26 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
         if not chunk_rows:
             continue
 
-        chunk_records: list[ChunkRecord] = [
-            ChunkRecord(
-                chunk_index=int(c["chunk_index"]),
-                section_title=c["section_title"],
-                text=c["text"],
-                token_estimate=0,
-                char_start=0,
-                char_end=0,
+        chunk_records: list[ChunkRecord] = []
+        for c in chunk_rows:
+            raw_path = c["heading_path_json"]
+            try:
+                path = json.loads(raw_path or "[]")
+            except json.JSONDecodeError:
+                path = []
+            if not isinstance(path, list):
+                path = []
+            chunk_records.append(
+                ChunkRecord(
+                    chunk_index=int(c["chunk_index"]),
+                    section_title=c["section_title"],
+                    text=c["text"],
+                    token_estimate=0,
+                    char_start=0,
+                    char_end=0,
+                    heading_path=[str(x) for x in path],
+                )
             )
-            for c in chunk_rows
-        ]
         chunk_ids = [int(c["id"]) for c in chunk_rows]
 
         try:

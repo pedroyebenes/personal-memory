@@ -59,6 +59,31 @@ def test_hybrid_search_exposes_metadata_ranking_debug(connection, fixture_vault,
     assert top.score_explanation["final_score"] == top.final_score
 
 
+def test_hybrid_search_prefers_chunk_whose_breadcrumb_matches_book_title(
+    connection, tmp_path, settings: Settings
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    needle = "xyzneedle123 shared surface phrase for retrieval"
+    (vault / "quijote.md").write_text(
+        f"---\ntitle: Don Quijote\n---\n\n# Capítulo IV\n\n## De la aventura\n\n{needle}\n",
+        encoding="utf-8",
+    )
+    (vault / "other.md").write_text(
+        f"---\ntitle: Other Book\n---\n\n# Part One\n\n{needle}\n",
+        encoding="utf-8",
+    )
+    ingest_vault(connection, vault, settings)
+
+    results = hybrid_search(connection, "Don Quijote xyzneedle123", settings, top_k=5)
+    assert results
+    paths = [r.source_path for r in results]
+    qi = next(i for i, p in enumerate(paths) if "quijote" in p.lower())
+    ot = next((i for i, p in enumerate(paths) if "other" in p.lower()), None)
+    if ot is not None:
+        assert qi < ot
+
+
 def test_hybrid_search_snippet_centers_matched_evidence(connection, tmp_path, settings: Settings) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()

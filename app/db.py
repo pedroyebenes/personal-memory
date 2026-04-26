@@ -129,6 +129,9 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     document_columns = _existing_columns(connection, "documents")
     if "file_size" not in document_columns:
         connection.execute("ALTER TABLE documents ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
+    chunk_columns = _existing_columns(connection, "chunks")
+    if chunk_columns and "heading_path_json" not in chunk_columns:
+        connection.execute("ALTER TABLE chunks ADD COLUMN heading_path_json TEXT NOT NULL DEFAULT '[]'")
 
 
 def init_db(connection: sqlite3.Connection, schema_path: Path | None = None) -> None:

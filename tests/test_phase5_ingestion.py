@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings, load_settings
+import json
+
 from app.ingest.register import ingest_vault, reindex_vault
 from app.vault.obsidian_parser import parse_markdown_file
 from app.vault.scanner import scan_markdown_entries, scan_markdown_files
@@ -270,3 +272,23 @@ def test_ingest_records_file_size_and_mtime(connection, tmp_path: Path, settings
         .isoformat()
     )
     assert row["last_modified"] == expected
+
+
+def test_ingest_persists_heading_path_json(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(vault / "note.md", "# A\n\nx\n\n## B\n\ny\n")
+
+    ingest_vault(connection, vault, settings)
+
+    rows = connection.execute(
+        """
+        SELECT chunk_index, heading_path_json FROM chunks c
+        JOIN documents d ON d.id = c.document_id
+        WHERE d.source_path LIKE '%note.md%'
+        ORDER BY chunk_index
+        """
+    ).fetchall()
+    paths = [json.loads(r["heading_path_json"]) for r in rows]
+    assert paths
+    assert any("A" in p and "B" in p for p in paths)

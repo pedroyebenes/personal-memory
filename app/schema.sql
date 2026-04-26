@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_index INTEGER NOT NULL,
     section_title TEXT,
     text TEXT NOT NULL,
+    heading_path_json TEXT NOT NULL DEFAULT '[]',
     token_estimate INTEGER NOT NULL,
     char_start INTEGER NOT NULL,
     char_end INTEGER NOT NULL,
