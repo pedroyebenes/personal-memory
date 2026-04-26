@@ -22,6 +22,15 @@
             <form id="refresh-form">
               <button class="secondary" id="refresh-button" type="submit">Refresh Index</button>
             </form>
+            <button
+              type="button"
+              class="help-trigger"
+              id="help-button"
+              aria-label="Open interface help"
+              aria-haspopup="dialog"
+              title="What does everything do?">
+              ?
+            </button>
           </div>
         </div>
         <div class="status-bar">
@@ -209,6 +218,135 @@
         </div>
       </section>
     </main>
+
+    <dialog class="help-dialog" id="help-dialog" aria-labelledby="help-title">
+      <div class="help-dialog-scroll">
+        <h2 class="help-title" id="help-title">Interface guide</h2>
+        <p class="help-lead">
+          This app searches your <strong>local</strong> Obsidian (Markdown) vault that has been indexed into SQLite. Answers and search results
+          are grounded in retrieved snippets, with file paths and references you can copy or open in Obsidian.
+        </p>
+
+        <section class="help-section">
+          <h3>Header and status</h3>
+          <ul>
+            <li>
+              <strong>Visualize</strong> opens a graph view in a new tab to explore the indexed vault structure and relationships, when
+              available.
+            </li>
+            <li>
+              <strong>Refresh Index</strong> re-scans your vault, parses notes, re-chunks and re-embeds as needed, and updates the local database. It
+              is disabled while a refresh is in progress. Check the <strong>warnings</strong> area for the last result or issues.
+            </li>
+            <li>
+              The <strong>status</strong> row summarizes: document and chunk counts, embedding coverage, the latest background job, and
+              <strong>refresh</strong> state (idle, running, or the last run outcome). Your server config may set default on/off for reranking and
+              concept boost, which the retrieval section reflects when the page loads.
+            </li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>Left rail: main tabs</h3>
+          <ul>
+            <li><strong>Answers</strong> — ask questions; each answer is a <strong>workspace</strong> (tab) with its own question, sources, and mode.</li>
+            <li><strong>Search</strong> — hybrid search only (no composed answer), with optional saved and recent queries.</li>
+            <li><strong>Concepts</strong> — browse and filter the concept and structure entities stored for your vault (from your index’s concept layer).</li>
+            <li><strong>Eval</strong> — run scripted retrieval checks to see whether expected notes and terms show up in the top results.</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>Workspaces (Answers)</h3>
+          <p>
+            Each time you <strong>Ask</strong>, a new workspace is created in the list. You can switch between them to compare prior questions,
+            source lists, and whether the reply was <strong>extractive</strong> (quoted from notes) or <strong>LLM synthesis</strong> (when
+            turned on and the provider is available).
+          </p>
+        </section>
+
+        <section class="help-section">
+          <h3>Retrieval</h3>
+          <ul>
+            <li>
+              <strong>Top K</strong> — how many chunks to retrieve as evidence for a question or a search. Higher values cast a wider net but may
+              add noise; lower values are stricter.
+            </li>
+            <li>
+              <strong>Rerank</strong> (optional) — after the main hybrid score, a second pass nudges results where the query words (and phrasing) appear
+              strongly in the title, section, and chunk text (for example exact phrase, term coverage, and terms close together). It can reorder
+              the top set before you see them.
+            </li>
+            <li>
+              <strong>Concept boost</strong> (optional) — if the index has concepts/entities that match your query, chunks linked to those concepts
+              get a small score increase so on-topic entity notes can rise in the list.
+            </li>
+            <li>
+              <strong>Advanced — Provider and model</strong> — choose the LLM provider and model name for features that use an API (Ollama, OpenAI, Gemini, NVIDIA, depending
+              on your setup). The line below the dropdown shows whether the selected provider is available (for example API keys for cloud providers).
+            </li>
+            <li>
+              <strong>LLM synthesis</strong> — when on, a model turns retrieved snippets into a short answer with inline citations, when the provider
+              works. When off, answers are <strong>extractive</strong> (built from your notes without generative text).
+            </li>
+            <li>
+              <strong>Query rewrite</strong> — when on, the app may rephrase your question to improve matching before search (uses the same LLM settings as
+              synthesis, subject to your config). If rewrite fails, the original query is used.
+            </li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>Filters</h3>
+          <p>Restrict results to notes that meet <strong>all</strong> of the active constraints (tags, aliases, path prefix, modified date range).</p>
+          <ul>
+            <li><strong>Tags</strong> / <strong>Aliases</strong> — comma-separated lists, matching the note’s tags and aliases in the index.</li>
+            <li><strong>Vault path</strong> — only files whose path in the vault starts with this string (for example a folder name).</li>
+            <li><strong>Modified from / to</strong> — last-modified range on the file.</li>
+            <li><strong>Clear</strong> — removes all filters. The header shows how many filters are active for the current run.</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>Search view</h3>
+          <p>
+            Same retrieval settings and filters as Answers, but you only get the ranked <strong>chunk list</strong> (snippets, scores, and actions),
+            not a full composed reply. <strong>Saved Searches</strong> and <strong>Recent Queries</strong> use the browser; they are not synced to the server.
+          </p>
+        </section>
+
+        <section class="help-section">
+          <h3>Concepts view</h3>
+          <p>
+            Use the filter box and dropdowns to narrow concepts or structure entries, and optional <code>method</code> string to see how a concept was
+            inferred. <strong>List</strong> fetches the current slice from the server for review.
+          </p>
+        </section>
+
+        <section class="help-section">
+          <h3>Retrieval eval</h3>
+          <p>
+            The textarea holds JSON: either an array of test cases or an object with a <code>cases</code> array. Each case usually has a
+            <code>query</code> plus expectations such as <code>expected_paths</code> and <code>expected_terms</code>. <strong>Run Checks</strong> calls the server to
+            compare retrieval against those expectations. The eval panel’s rerank and concept-boost checkboxes only affect this check, not the main
+            Answers/Search settings unless you mirror them.
+          </p>
+        </section>
+
+        <section class="help-section">
+          <h3>Result cards and scores</h3>
+          <p>
+            Each result shows a <strong>final score</strong> derived from keyword + semantic + metadata, with optional <strong>rerank</strong> and
+            <strong>concept</strong> contributions when those features are on. <strong>Copy Path</strong>, <strong>Copy Section / Source Ref</strong>, and
+            <strong>Copy Markdown</strong> put citation-friendly strings on the clipboard. <strong>Open Hook</strong> uses an <code>obsidian://</code> URL to
+            open the file in the Obsidian app when installed.
+          </p>
+        </section>
+      </div>
+      <form class="help-dialog-footer" method="dialog">
+        <button type="submit" class="secondary" autofocus>Close</button>
+      </form>
+    </dialog>
 
     <script src="/static/app.js"></script>
   </body>

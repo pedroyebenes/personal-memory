@@ -4,6 +4,8 @@
       const stats = document.getElementById("stats");
       const refreshForm = document.getElementById("refresh-form");
       const refreshButton = document.getElementById("refresh-button");
+      const helpButton = document.getElementById("help-button");
+      const helpDialog = document.getElementById("help-dialog");
       const answerTabs = document.getElementById("answer-tabs");
       const answerDetail = document.getElementById("answer-detail");
       const warnings = document.getElementById("warnings");
@@ -816,6 +818,16 @@
           renderWarnings([`Status check failed: ${error}`]);
         }
       }
+
+      helpButton.addEventListener("click", () => {
+        if (helpDialog && typeof helpDialog.showModal === "function") {
+          const helpScroll = helpDialog.querySelector(".help-dialog-scroll");
+          if (helpScroll) {
+            helpScroll.scrollTop = 0;
+          }
+          helpDialog.showModal();
+        }
+      });
 
       refreshForm.addEventListener("submit", async (event) => {
         event.preventDefault();
