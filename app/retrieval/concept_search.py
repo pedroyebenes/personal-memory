@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
+from app.config import Settings
 from app.processing.concepts import normalize_key, normalized_key_is_stopword_only
+from app.processing.embeddings import cosine_similarity, embed_texts
 from app.retrieval.sources import build_markdown_ref, build_source_ref
 
 STRONG_CONCEPT_METHODS = {"wikilink", "tag", "alias", "definition", "inline_tag"}
@@ -326,6 +329,50 @@ def chunks_with_concepts(
     for row in rows:
         matches.setdefault(int(row["chunk_id"]), set()).add(int(row["entity_id"]))
     return matches
+
+
+def semantic_concept_search(
+    connection: sqlite3.Connection,
+    query: str,
+    settings: Settings,
+    top_k: int = 20,
+) -> list[dict[str, object]]:
+    """Rank concepts by embedding similarity to the query (Python cosine scan)."""
+    q = (query or "").strip()
+    if not q or top_k <= 0:
+        return []
+    qv = embed_texts([q], settings.embedding_model_name)[0]
+    rows = connection.execute(
+        """
+        SELECT ee.entity_id, ee.vector_json, ee.model_name,
+               e.canonical_name, e.normalized_key, e.mention_count
+        FROM entity_embeddings ee
+        JOIN entities e ON e.id = ee.entity_id
+        WHERE (e.entity_type = 'concept' OR e.entity_type IS NULL)
+        """
+    ).fetchall()
+    scored: list[tuple[float, sqlite3.Row]] = []
+    for row in rows:
+        if str(row["model_name"] or "") != settings.embedding_model_name:
+            continue
+        vec = json.loads(row["vector_json"])
+        if not isinstance(vec, list):
+            continue
+        s = cosine_similarity(qv, [float(x) for x in vec])
+        scored.append((s, row))
+    scored.sort(key=lambda item: -item[0])
+    out: list[dict[str, object]] = []
+    for score, row in scored[:top_k]:
+        out.append(
+            {
+                "id": int(row["entity_id"]),
+                "canonical_name": row["canonical_name"],
+                "normalized_key": row["normalized_key"],
+                "mention_count": int(row["mention_count"] or 0),
+                "semantic_score": round(float(score), 6),
+            }
+        )
+    return out
 
 
 def concept_noise_report(connection: sqlite3.Connection, *, limit: int = 50) -> dict[str, object]:

@@ -18,6 +18,7 @@ from app.processing.concepts import (
     normalize_key,
 )
 from app.processing.embeddings import embed_texts
+from app.processing.entity_embedding_sync import sync_entity_embeddings
 from app.util.hashing import sha256_text
 from app.util.logging import get_logger
 from app.util.timestamps import utc_now_iso
@@ -460,6 +461,7 @@ def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Set
     _refresh_entity_mention_counts(connection)
     pruned_entities = _prune_orphan_entities(connection)
     connection.commit()
+    entity_embed_stats = sync_entity_embeddings(connection, settings)
     final_status = "completed" if not failures else "completed_with_errors"
     _record_run(connection, "ingest", vault_path, final_status, counts["indexed"], run_id=run_id)
     return {
@@ -475,6 +477,7 @@ def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Set
         "changed_document_ids": changed_document_ids,
         "removed_document_ids": removed_document_ids,
         "pruned_entities": pruned_entities,
+        "entity_embeddings": entity_embed_stats,
         "scope": {"include": list(include), "exclude": list(exclude)},
     }
 
@@ -529,6 +532,7 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
     _refresh_entity_mention_counts(connection)
     pruned_entities = _prune_orphan_entities(connection)
     connection.commit()
+    entity_embed_stats = sync_entity_embeddings(connection, settings)
     final_status = "completed" if not failures else "completed_with_errors"
     _record_run(connection, "reindex", vault_path, final_status, indexed, run_id=run_id)
     return {
@@ -544,6 +548,7 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
         "changed_document_ids": changed_document_ids,
         "removed_document_ids": [],
         "pruned_entities": pruned_entities,
+        "entity_embeddings": entity_embed_stats,
         "scope": {"include": list(include), "exclude": list(exclude)},
     }
 
@@ -689,7 +694,10 @@ def rebuild_chunk_vectors(connection: sqlite3.Connection) -> dict[str, object]:
     return {"status": "ok", "rows": len(rows)}
 
 
-def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
+def reclassify_entities(
+    connection: sqlite3.Connection,
+    settings: Settings | None = None,
+) -> dict[str, object]:
     """Recompute ``entity_type``, re-key rows, and merge duplicates after normalization."""
     rows = connection.execute(
         """
@@ -720,16 +728,22 @@ def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
     connection.commit()
     mention_count = int(connection.execute("SELECT COUNT(*) AS c FROM entity_mentions").fetchone()["c"])
     entity_count = int(connection.execute("SELECT COUNT(*) AS c FROM entities").fetchone()["c"])
-    return {
+    result: dict[str, object] = {
         "entities_scanned": len(rows),
         "entities_updated": updated,
         "entity_mentions": mention_count,
         "entities": entity_count,
         **merge_stats,
     }
+    if settings is not None:
+        result["entity_embeddings"] = sync_entity_embeddings(connection, settings)
+    return result
 
 
-def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
+def refresh_concepts(
+    connection: sqlite3.Connection,
+    settings: Settings | None = None,
+) -> dict[str, object]:
     """Rebuild the concept layer from existing chunks without touching documents/embeddings."""
     connection.execute("DELETE FROM entity_mentions")
     connection.execute("DELETE FROM entities")
@@ -821,7 +835,7 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
     structure_count = int(
         connection.execute("SELECT COUNT(*) AS count FROM entities WHERE entity_type = 'structure'").fetchone()["count"]
     )
-    return {
+    result: dict[str, object] = {
         "documents": indexed_documents,
         "mentions": total_mentions,
         "entities": entity_count,
@@ -829,6 +843,9 @@ def refresh_concepts(connection: sqlite3.Connection) -> dict[str, object]:
         "structures": structure_count,
         "pruned_entities": pruned_entities,
     }
+    if settings is not None:
+        result["entity_embeddings"] = sync_entity_embeddings(connection, settings)
+    return result
 
 
 def status_summary(connection: sqlite3.Connection) -> dict[str, object]:

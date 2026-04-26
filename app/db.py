@@ -201,12 +201,17 @@ def _apply_schema_migrations(connection: sqlite3.Connection) -> None:
         _schema_meta_set(connection, "migration_chunks_heading_path_json", "1")
 
     if table_exists(connection, "entity_embeddings"):
+        ee_cols = _existing_columns(connection, "entity_embeddings")
+        if ee_cols and "content_hash" not in ee_cols:
+            connection.execute(
+                "ALTER TABLE entity_embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
+            )
         _schema_meta_set(connection, "migration_entity_embeddings", "1")
 
     if table_exists(connection, "chunk_vectors"):
         _schema_meta_set(connection, "migration_chunk_vectors", str(_infer_embedding_dimension(connection)))
 
-    _schema_meta_set(connection, "schema_core_version", "5")
+    _schema_meta_set(connection, "schema_core_version", "8")
 
 
 def ensure_chunk_vectors_table(connection: sqlite3.Connection, dimension: int) -> None:

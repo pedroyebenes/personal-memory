@@ -18,7 +18,12 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
 from app.processing.concepts import classify_entity_type, normalize_key
-from app.retrieval.concept_search import CONCEPT_QUALITIES, get_concept_detail, list_concepts
+from app.retrieval.concept_search import (
+    CONCEPT_QUALITIES,
+    get_concept_detail,
+    list_concepts,
+    semantic_concept_search,
+)
 from app.retrieval.evaluation import evaluate_retrieval_cases
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
@@ -159,21 +164,89 @@ def _viz_top_concept_payload(mentions: list[sqlite3.Row]) -> dict[str, object] |
     }
 
 
+def _cluster_name_from_entity_centroid(
+    conn: sqlite3.Connection,
+    cluster_row_indices: list[int],
+    vectors: Any,
+    *,
+    min_chunks: int = 3,
+) -> dict[str, object] | None:
+    if len(cluster_row_indices) < min_chunks:
+        return None
+    import numpy as np
+
+    from app.processing.embeddings import cosine_similarity
+
+    centroid = vectors[cluster_row_indices].mean(axis=0).astype(np.float64)
+    centroid_list = centroid.tolist()
+    rows = conn.execute(
+        """
+        SELECT ee.vector_json, e.canonical_name
+        FROM entity_embeddings ee
+        JOIN entities e ON e.id = ee.entity_id
+        WHERE (e.entity_type = 'concept' OR e.entity_type IS NULL)
+        """
+    ).fetchall()
+    if not rows:
+        return None
+    scored: list[tuple[float, str]] = []
+    for row in rows:
+        vec = json.loads(row["vector_json"])
+        if not isinstance(vec, list):
+            continue
+        s = cosine_similarity(centroid_list, [float(x) for x in vec])
+        scored.append((s, str(row["canonical_name"])))
+    scored.sort(key=lambda item: -item[0])
+    if not scored or scored[0][0] < 0.01:
+        return None
+    top_s = scored[0][0]
+    names = [n for s, n in scored if s >= top_s * 0.88][:5]
+    if not names:
+        names = [scored[0][1]]
+    return {
+        "name": " / ".join(names[:2]),
+        "terms": names[:5],
+        "size": len(cluster_row_indices),
+    }
+
+
 def _cluster_name_from_chunk_concepts(
     chunk_ids: list[int],
     by_chunk: dict[int, list[sqlite3.Row]],
     fallback_rows: list[sqlite3.Row],
+    *,
+    conn: sqlite3.Connection | None = None,
+    cluster_row_indices: list[int] | None = None,
+    vectors: Any | None = None,
 ) -> dict[str, object]:
     counter: Counter[str] = Counter()
     for cid in chunk_ids:
         for row in by_chunk.get(cid, []):
             counter[str(row["canonical_name"])] += 1
     if not counter:
+        if (
+            conn is not None
+            and cluster_row_indices is not None
+            and vectors is not None
+            and len(fallback_rows) >= 3
+        ):
+            ent = _cluster_name_from_entity_centroid(conn, cluster_row_indices, vectors)
+            if ent:
+                return ent
         return _cluster_name_from_rows(fallback_rows)
     chosen = [name for name, count in counter.most_common(5) if count >= 2]
     if not chosen:
         chosen = [name for name, _ in counter.most_common(2)]
     if not chosen:
+        if (
+            conn is not None
+            and cluster_row_indices is not None
+            and vectors is not None
+            and len(fallback_rows) >= 3
+        ):
+            ent = _cluster_name_from_entity_centroid(conn, cluster_row_indices, vectors)
+            if ent:
+                return ent
         return _cluster_name_from_rows(fallback_rows)
     return {
         "name": " / ".join(chosen[:2]),
@@ -301,13 +374,22 @@ def _compute_viz_data(conn: sqlite3.Connection) -> dict[str, object]:
     for i, row in enumerate(rows):
         cluster_rows[cluster_ids[i]].append(row)
     clusters = []
+    id_to_index = {int(r["id"]): i for i, r in enumerate(rows)}
     for cluster_id in range(n_clusters):
         cluster_row_list = cluster_rows[cluster_id]
         c_ids = [int(r["id"]) for r in cluster_row_list]
+        cluster_indices = [id_to_index[cid] for cid in c_ids if cid in id_to_index]
         clusters.append(
             {
                 "id": cluster_id,
-                **_cluster_name_from_chunk_concepts(c_ids, concept_by_chunk, cluster_row_list),
+                **_cluster_name_from_chunk_concepts(
+                    c_ids,
+                    concept_by_chunk,
+                    cluster_row_list,
+                    conn=conn,
+                    cluster_row_indices=cluster_indices,
+                    vectors=vectors,
+                ),
             }
         )
 
@@ -617,6 +699,18 @@ def handle_api_get(
                 "offset": offset,
             }
         )
+    if parsed.path.rstrip("/") == "/api/concepts/search":
+        query_params = parse_qs(parsed.query)
+        raw_q = query_params.get("q", query_params.get("query", [""]))[0].strip()
+        top_k = _read_top_k(query_params.get("top_k", ["20"])[0], 20)
+        if not raw_q:
+            return HTTPStatus.OK, _success_payload({"query": "", "top_k": top_k, "concepts": []})
+        ranked = with_connection(
+            lambda conn: semantic_concept_search(conn, raw_q, settings, top_k=top_k)
+        )
+        return HTTPStatus.OK, _success_payload(
+            {"query": raw_q, "top_k": top_k, "concepts": ranked}
+        )
     if parsed.path.startswith("/api/documents/"):
         suffix = parsed.path[len("/api/documents/") :].strip("/")
         if not suffix:
@@ -733,7 +827,7 @@ def handle_api_post(
             summary = with_connection(
                 lambda conn: {
                     **ingest_vault(conn, settings.vault_path, settings),
-                    "concepts": refresh_concepts(conn),
+                    "concepts": refresh_concepts(conn, settings),
                 }
             )
         except Exception as exc:
@@ -747,7 +841,7 @@ def handle_api_post(
         refresh_state.finish(dict(summary))
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/concepts/refresh":
-        result = with_connection(lambda conn: refresh_concepts(conn))
+        result = with_connection(lambda conn: refresh_concepts(conn, settings))
         return HTTPStatus.OK, _success_payload(result)
     if parsed.path == "/api/eval/retrieval":
         raw_cases = payload.get("cases", [])

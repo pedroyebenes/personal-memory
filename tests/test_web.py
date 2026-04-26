@@ -301,6 +301,32 @@ def test_search_accepts_rerank_flag(connection, fixture_vault: Path, settings: S
     assert any(item["rerank_score"] > 0 for item in payload["results"])
 
 
+def test_api_concepts_semantic_search(connection, tmp_path: Path, settings: Settings) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "a.md").write_text(
+        "---\ntitle: A\n---\n\n# X\n\n[[Fortune]] destiny here.\n",
+        encoding="utf-8",
+    )
+    (vault / "b.md").write_text(
+        "---\ntitle: B\n---\n\n# Y\n\n[[Fortune]] more destiny.\n",
+        encoding="utf-8",
+    )
+    ingest_vault(connection, vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/concepts/search?q=destiny&top_k=5",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+    assert int(status) == 200
+    assert payload["query"] == "destiny"
+    names = [c["canonical_name"] for c in payload["concepts"]]
+    assert "Fortune" in names
+
+
 def test_search_accepts_debug_scores_flag(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
     with_connection = lambda callback: callback(connection)

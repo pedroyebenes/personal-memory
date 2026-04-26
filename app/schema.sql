@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS entity_embeddings (
     entity_id INTEGER PRIMARY KEY,
     model_name TEXT NOT NULL,
     vector_json TEXT NOT NULL,
+    content_hash TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
 );

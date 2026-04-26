@@ -20,6 +20,7 @@ personal-memory reindex [--vault PATH]
 personal-memory embeddings rebuild [--no-breadcrumbs]
 personal-memory vectors rebuild
 personal-memory concepts reclassify
+personal-memory concepts search --query "..."
 personal-memory search --query "..." [--concept-boost] [--debug-scores]
 personal-memory ask --query "..." [--use-llm]
 personal-memory web [--host HOST] [--port PORT]
@@ -64,7 +65,7 @@ This is a local-first personal knowledge system that indexes Obsidian Markdown v
 
 ### Web UI
 
-Static assets live in `app/web_assets/`. REST endpoints are `/api/status`, `/api/search`, `/api/chat`, `/api/refresh`.
+Static assets live in `app/web_assets/`. REST endpoints include `/api/status`, `/api/search`, `/api/chat`, `/api/refresh`, `/api/concepts`, `/api/concepts/search?q=...` (semantic concept layer), and `/api/viz`.
 
 ### Tests
 

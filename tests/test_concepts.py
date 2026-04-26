@@ -537,7 +537,7 @@ def test_refresh_concepts_rebuilds_from_existing_chunks(connection, fixture_vaul
     connection.execute("DELETE FROM entities")
     connection.commit()
 
-    result = refresh_concepts(connection)
+    result = refresh_concepts(connection, settings)
 
     assert result["documents"] == 3
     assert result["mentions"] > 0
@@ -562,7 +562,7 @@ def test_refresh_concepts_is_idempotent_for_body_text_mentions(connection, tmp_p
     )
     ingest_vault(connection, vault, settings)
 
-    first = refresh_concepts(connection)
+    first = refresh_concepts(connection, settings)
     first_rows = connection.execute(
         """
         SELECT e.normalized_key, em.extraction_method, c.chunk_index
@@ -573,7 +573,7 @@ def test_refresh_concepts_is_idempotent_for_body_text_mentions(connection, tmp_p
         """
     ).fetchall()
 
-    second = refresh_concepts(connection)
+    second = refresh_concepts(connection, settings)
     second_rows = connection.execute(
         """
         SELECT e.normalized_key, em.extraction_method, c.chunk_index
@@ -635,14 +635,14 @@ def test_reclassify_entities_is_idempotent_and_preserves_mentions(
         "SELECT entity_id, chunk_id, mention_text, extraction_method FROM entity_mentions ORDER BY id"
     ).fetchall()
 
-    first = reclassify_entities(connection)
+    first = reclassify_entities(connection, settings)
     assert first["entities_updated"] >= 1
     et = connection.execute("SELECT entity_type FROM entities WHERE id = ?", (int(row["id"]),)).fetchone()[
         "entity_type"
     ]
     assert et == "structure"
 
-    second = reclassify_entities(connection)
+    second = reclassify_entities(connection, settings)
     assert second["entities_updated"] == 0
     assert second.get("entities_merged", 0) == 0
 

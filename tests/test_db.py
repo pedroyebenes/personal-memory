@@ -59,6 +59,6 @@ def test_schema_meta_records_core_version(tmp_path: Path) -> None:
         init_db(conn)
         row = conn.execute("SELECT value FROM schema_meta WHERE key = ?", ("schema_core_version",)).fetchone()
         assert row is not None
-        assert int(row["value"]) >= 5
+        assert int(row["value"]) >= 8
     finally:
         conn.close()

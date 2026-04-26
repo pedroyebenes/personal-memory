@@ -23,6 +23,7 @@ from app.retrieval.concept_search import (
     find_concept,
     get_concept_detail,
     list_concepts,
+    semantic_concept_search,
 )
 from app.retrieval.evaluation import evaluate_retrieval
 from app.retrieval.hybrid_search import hybrid_search
@@ -104,6 +105,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     concepts_sub.add_parser("refresh")
     concepts_sub.add_parser("reclassify")
+    concept_search_parser = concepts_sub.add_parser("search")
+    concept_search_parser.add_argument("--query", required=True)
+    concept_search_parser.add_argument("--top-k", type=int, default=20)
     noise_parser = concepts_sub.add_parser("noise-report")
     noise_parser.add_argument("--limit", type=int, default=50)
 
@@ -260,10 +264,25 @@ def main() -> None:
             print(json.dumps(detail, indent=2))
             return
         if args.concepts_command == "refresh":
-            print(json.dumps(refresh_concepts(connection), indent=2))
+            print(json.dumps(refresh_concepts(connection, settings), indent=2))
             return
         if args.concepts_command == "reclassify":
-            print(json.dumps(reclassify_entities(connection), indent=2))
+            print(json.dumps(reclassify_entities(connection, settings), indent=2))
+            return
+        if args.concepts_command == "search":
+            print(
+                json.dumps(
+                    {
+                        "concepts": semantic_concept_search(
+                            connection,
+                            args.query,
+                            settings,
+                            top_k=args.top_k,
+                        )
+                    },
+                    indent=2,
+                )
+            )
             return
         if args.concepts_command == "noise-report":
             print(json.dumps(concept_noise_report(connection, limit=args.limit), indent=2))
