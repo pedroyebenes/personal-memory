@@ -19,6 +19,9 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+vec = [
+  "sqlite-vec>=0.1.6",
+]
 
 [project.scripts]
 personal-memory = "app.cli:main"

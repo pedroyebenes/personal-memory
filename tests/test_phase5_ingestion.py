@@ -9,7 +9,8 @@ import pytest
 from app.config import Settings, load_settings
 import json
 
-from app.ingest.register import ingest_vault, reindex_vault
+from app.ingest.register import ingest_vault, rebuild_chunk_vectors, rebuild_embeddings, reindex_vault
+from app.retrieval.hybrid_search import hybrid_search
 from app.vault.obsidian_parser import parse_markdown_file
 from app.vault.scanner import scan_markdown_entries, scan_markdown_files
 
@@ -292,3 +293,61 @@ def test_ingest_persists_heading_path_json(connection, tmp_path: Path, settings:
     paths = [json.loads(r["heading_path_json"]) for r in rows]
     assert paths
     assert any("A" in p and "B" in p for p in paths)
+
+
+def test_single_document_ingest_rebinds_mentions_and_prunes_orphans(
+    connection, tmp_path: Path, settings: Settings
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    note = vault / "note.md"
+    note.write_text("# Doc\n\nSee [[LonelyWikilink]] for details.\n", encoding="utf-8")
+    ingest_vault(connection, vault, settings)
+
+    row = connection.execute(
+        "SELECT id, mention_count FROM entities WHERE canonical_name = ?",
+        ("LonelyWikilink",),
+    ).fetchone()
+    assert row is not None
+    assert int(row["mention_count"]) >= 1
+    entity_id = int(row["id"])
+
+    note.write_text("# Doc\n\nNo wikilinks in this body.\n", encoding="utf-8")
+
+    bumped = datetime(2032, 6, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(note, (bumped, bumped))
+
+    ingest_vault(connection, vault, settings)
+
+    assert connection.execute("SELECT id FROM entities WHERE id = ?", (entity_id,)).fetchone() is None
+
+
+def test_rebuild_embeddings_is_idempotent_without_breadcrumbs(
+    connection, fixture_vault: Path, settings: Settings
+) -> None:
+    settings.use_breadcrumb_embeddings = False
+    ingest_vault(connection, fixture_vault, settings)
+    query = "weekly review"
+    before = hybrid_search(connection, query, settings, top_k=5)
+    ids_before = [r.chunk_id for r in before]
+
+    summary = rebuild_embeddings(connection, settings, use_breadcrumbs=False)
+    assert summary["status"] == "ok"
+
+    after = hybrid_search(connection, query, settings, top_k=5)
+    assert [r.chunk_id for r in after] == ids_before
+
+
+def test_vectors_rebuild_does_not_mutate_embeddings(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    snap = connection.execute(
+        "SELECT chunk_id, vector_json FROM embeddings ORDER BY chunk_id"
+    ).fetchall()
+    payload = rebuild_chunk_vectors(connection)
+    assert payload["status"] in {"ok", "skipped"}
+    after = connection.execute(
+        "SELECT chunk_id, vector_json FROM embeddings ORDER BY chunk_id"
+    ).fetchall()
+    assert [(int(r["chunk_id"]), r["vector_json"]) for r in snap] == [
+        (int(r["chunk_id"]), r["vector_json"]) for r in after
+    ]

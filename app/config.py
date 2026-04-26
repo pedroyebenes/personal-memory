@@ -16,6 +16,7 @@ DEFAULT_ENABLE_LLM_SYNTHESIS = False
 DEFAULT_ENABLE_QUERY_REWRITE = False
 DEFAULT_ENABLE_RERANKING = False
 DEFAULT_ENABLE_CONCEPT_BOOST = False
+DEFAULT_USE_BREADCRUMB_EMBEDDINGS = True
 DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_SYNTHESIS_MODEL_NAME = "gemma4:e2b"
 DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME = "gpt-5-mini"
@@ -53,6 +54,7 @@ class Settings:
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
     ingest_include: tuple[str, ...] = ()
     ingest_exclude: tuple[str, ...] = ()
+    use_breadcrumb_embeddings: bool = DEFAULT_USE_BREADCRUMB_EMBEDDINGS
 
     def is_supported_provider(self, provider: str | None = None) -> bool:
         provider_name = (provider or self.llm_provider).strip().lower()
@@ -295,6 +297,7 @@ def load_settings(config_path: str | None = None) -> Settings:
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", file_values.get("OLLAMA_BASE_URL"))
     ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
     ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
+    breadcrumb_emb_value = os.getenv("USE_BREADCRUMB_EMBEDDINGS", file_values.get("USE_BREADCRUMB_EMBEDDINGS"))
 
     vault_path = _coerce_path(os.getenv("VAULT_PATH"), resolve=True)
     if vault_path is None:
@@ -328,4 +331,5 @@ def load_settings(config_path: str | None = None) -> Settings:
         ollama_base_url=ollama_base_url or DEFAULT_OLLAMA_BASE_URL,
         ingest_include=_parse_pattern_list(ingest_include_value),
         ingest_exclude=_parse_pattern_list(ingest_exclude_value),
+        use_breadcrumb_embeddings=_parse_bool(breadcrumb_emb_value, DEFAULT_USE_BREADCRUMB_EMBEDDINGS),
     )

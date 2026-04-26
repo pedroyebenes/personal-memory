@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from app.config import Settings
+from app.db import ensure_chunk_vectors_table, sqlite_vec_available, table_exists
 from app.models import ChunkRecord, ParsedDocument
 from app.processing.chunker import breadcrumb_text, chunk_document
 from app.processing.concepts import (
@@ -24,6 +25,69 @@ from app.vault.obsidian_parser import parse_markdown_file
 from app.vault.scanner import ScannedFile, scan_markdown_entries
 
 LOGGER = get_logger(__name__)
+
+
+def _chunk_vectors_ready(connection: sqlite3.Connection) -> bool:
+    return sqlite_vec_available(connection) and table_exists(connection, "chunk_vectors")
+
+
+def _purge_chunk_vectors_for_chunk_ids(connection: sqlite3.Connection, chunk_ids: list[int]) -> None:
+    if not chunk_ids or not _chunk_vectors_ready(connection):
+        return
+    connection.executemany("DELETE FROM chunk_vectors WHERE chunk_id = ?", [(cid,) for cid in chunk_ids])
+
+
+def _serialize_vec_embedding(vector: list[float]) -> bytes:
+    from sqlite_vec import serialize_float32
+
+    return serialize_float32(vector)
+
+
+def _upsert_chunk_vector(connection: sqlite3.Connection, chunk_id: int, vector: list[float]) -> None:
+    if not _chunk_vectors_ready(connection):
+        return
+    connection.execute("DELETE FROM chunk_vectors WHERE chunk_id = ?", (chunk_id,))
+    blob = _serialize_vec_embedding(vector)
+    connection.execute(
+        "INSERT INTO chunk_vectors (chunk_id, embedding) VALUES (?, ?)",
+        (chunk_id, blob),
+    )
+
+
+def _embedding_texts_for_chunks(parsed: ParsedDocument, chunks: list[ChunkRecord], settings: Settings) -> list[str]:
+    if settings.use_breadcrumb_embeddings:
+        return [breadcrumb_text(parsed.title, ch.heading_path, ch.text) for ch in chunks]
+    return [ch.text for ch in chunks]
+
+
+def _entity_ids_for_document_chunks(connection: sqlite3.Connection, document_id: int) -> set[int]:
+    rows = connection.execute(
+        """
+        SELECT DISTINCT em.entity_id
+        FROM entity_mentions em
+        JOIN chunks c ON c.id = em.chunk_id
+        WHERE c.document_id = ?
+        """,
+        (document_id,),
+    ).fetchall()
+    return {int(r["entity_id"]) for r in rows}
+
+
+def _rebind_entity_counts_for_entities(connection: sqlite3.Connection, entity_ids: set[int]) -> None:
+    if not entity_ids:
+        return
+    placeholders = ",".join("?" for _ in entity_ids)
+    connection.execute(
+        f"""
+        UPDATE entities
+        SET mention_count = COALESCE(
+            (SELECT COUNT(*) FROM entity_mentions em WHERE em.entity_id = entities.id),
+            0
+        )
+        WHERE id IN ({placeholders})
+        """,
+        tuple(entity_ids),
+    )
 
 
 def _get_document_row(connection: sqlite3.Connection, source_path: str) -> sqlite3.Row | None:
@@ -67,6 +131,9 @@ def _prune_documents_not_in_vault(
     stale_ids = [int(row["id"]) for row in rows if row["source_path"] not in current_paths]
     if not stale_ids:
         return []
+    for document_id in stale_ids:
+        chunk_rows = connection.execute("SELECT id FROM chunks WHERE document_id = ?", (document_id,)).fetchall()
+        _purge_chunk_vectors_for_chunk_ids(connection, [int(r["id"]) for r in chunk_rows])
     connection.executemany("DELETE FROM documents WHERE id = ?", [(document_id,) for document_id in stale_ids])
     connection.commit()
     LOGGER.info("Pruned %d stale documents from the index", len(stale_ids))
@@ -147,6 +214,7 @@ def _delete_document_chunks(connection: sqlite3.Connection, document_id: int) ->
     if chunk_ids:
         connection.executemany("DELETE FROM embeddings WHERE chunk_id = ?", [(chunk_id,) for chunk_id in chunk_ids])
         connection.executemany("DELETE FROM chunks_fts WHERE chunk_id = ?", [(chunk_id,) for chunk_id in chunk_ids])
+        _purge_chunk_vectors_for_chunk_ids(connection, chunk_ids)
     connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
     connection.commit()
 
@@ -281,16 +349,19 @@ def _prune_orphan_entities(connection: sqlite3.Connection) -> int:
 
 def _insert_embeddings(connection: sqlite3.Connection, chunk_ids: list[int], texts: list[str], settings: Settings) -> None:
     vectors = embed_texts(texts, settings.embedding_model_name)
+    if vectors:
+        ensure_chunk_vectors_table(connection, len(vectors[0]))
+    now = utc_now_iso()
     connection.executemany(
         """
         INSERT INTO embeddings (chunk_id, model_name, vector_json, created_at)
         VALUES (?, ?, ?, ?)
         """,
-        [
-            (chunk_id, settings.embedding_model_name, json.dumps(vector), utc_now_iso())
-            for chunk_id, vector in zip(chunk_ids, vectors)
-        ],
+        [(chunk_id, settings.embedding_model_name, json.dumps(vector), now) for chunk_id, vector in zip(chunk_ids, vectors)],
     )
+    if _chunk_vectors_ready(connection):
+        for chunk_id, vector in zip(chunk_ids, vectors):
+            _upsert_chunk_vector(connection, chunk_id, vector)
     connection.commit()
 
 
@@ -322,6 +393,7 @@ def _ingest_single_document(
         return "skipped", int(existing["id"]), warnings
 
     document_id = _upsert_document(connection, parsed, content_hash, entry.mtime_iso, entry.size)
+    touched_entities = _entity_ids_for_document_chunks(connection, document_id)
     _delete_document_chunks(connection, document_id)
     chunks = chunk_document(parsed.normalized_text)
     chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
@@ -329,13 +401,19 @@ def _ingest_single_document(
         _insert_embeddings(
             connection,
             chunk_ids,
-            [breadcrumb_text(parsed.title, ch.heading_path, ch.text) for ch in chunks],
+            _embedding_texts_for_chunks(parsed, chunks, settings),
             settings,
         )
         mentions = extract_concept_mentions(
             parsed, chunks, existing_normalized_keys=_existing_entity_normalized_keys(connection)
         )
         _insert_concept_mentions(connection, chunk_ids, mentions)
+    touched_entities |= _entity_ids_for_document_chunks(connection, document_id)
+    _rebind_entity_counts_for_entities(connection, touched_entities)
+    pruned_local = _prune_orphan_entities(connection)
+    connection.commit()
+    if pruned_local:
+        LOGGER.info("Pruned %d orphan entities after indexing %s", pruned_local, path)
     LOGGER.info("Indexed %s with %d chunks", path, len(chunk_ids))
     return "indexed", document_id, warnings
 
@@ -403,6 +481,8 @@ def ingest_vault(connection: sqlite3.Connection, vault_path: Path, settings: Set
 
 def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Settings) -> dict[str, object]:
     run_id = _record_run(connection, "reindex", vault_path, "running")
+    if table_exists(connection, "chunk_vectors"):
+        connection.execute("DELETE FROM chunk_vectors")
     connection.execute("DELETE FROM entity_mentions")
     connection.execute("DELETE FROM entities")
     connection.execute("DELETE FROM embeddings")
@@ -431,7 +511,7 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
                     _insert_embeddings(
                         connection,
                         chunk_ids,
-                        [breadcrumb_text(parsed.title, ch.heading_path, ch.text) for ch in chunks],
+                        _embedding_texts_for_chunks(parsed, chunks, settings),
                         settings,
                     )
                     mentions = extract_concept_mentions(parsed, chunks, existing_normalized_keys=frozenset())
@@ -529,6 +609,86 @@ def _merge_and_rekey_entities(connection: sqlite3.Connection) -> dict[str, int]:
     return {"entities_merged": merged, "entities_rekeyed": rekeyed}
 
 
+def rebuild_embeddings(
+    connection: sqlite3.Connection,
+    settings: Settings,
+    *,
+    use_breadcrumbs: bool | None = None,
+) -> dict[str, object]:
+    """Re-encode stored chunks and refresh ``embeddings`` (and ``chunk_vectors`` when enabled)."""
+    use_bc = settings.use_breadcrumb_embeddings if use_breadcrumbs is None else use_breadcrumbs
+    rows = connection.execute(
+        """
+        SELECT c.id AS chunk_id, d.title AS document_title, c.text, c.heading_path_json
+        FROM chunks c
+        JOIN documents d ON d.id = c.document_id
+        ORDER BY c.id
+        """
+    ).fetchall()
+    if not rows:
+        return {"status": "ok", "chunks_updated": 0, "use_breadcrumb_embeddings": use_bc}
+    batch_size = 48
+    updated = 0
+    now = utc_now_iso()
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        texts: list[str] = []
+        chunk_ids: list[int] = []
+        for row in batch:
+            raw_path = row["heading_path_json"]
+            try:
+                path = json.loads(raw_path or "[]")
+            except json.JSONDecodeError:
+                path = []
+            if not isinstance(path, list):
+                path = []
+            heading_path = [str(x) for x in path]
+            body = str(row["text"] or "")
+            title = str(row["document_title"] or "")
+            texts.append(breadcrumb_text(title, heading_path, body) if use_bc else body)
+            chunk_ids.append(int(row["chunk_id"]))
+        vectors = embed_texts(texts, settings.embedding_model_name)
+        if vectors:
+            ensure_chunk_vectors_table(connection, len(vectors[0]))
+        for cid, vec in zip(chunk_ids, vectors):
+            connection.execute(
+                """
+                UPDATE embeddings
+                SET vector_json = ?, model_name = ?, created_at = ?
+                WHERE chunk_id = ?
+                """,
+                (json.dumps(vec), settings.embedding_model_name, now, cid),
+            )
+            if _chunk_vectors_ready(connection):
+                _upsert_chunk_vector(connection, cid, vec)
+        connection.commit()
+        updated += len(chunk_ids)
+    return {"status": "ok", "chunks_updated": updated, "use_breadcrumb_embeddings": use_bc}
+
+
+def rebuild_chunk_vectors(connection: sqlite3.Connection) -> dict[str, object]:
+    """Populate ``chunk_vectors`` from existing ``embeddings`` without re-encoding."""
+    if not sqlite_vec_available(connection):
+        return {"status": "skipped", "reason": "sqlite-vec unavailable"}
+    rows = connection.execute("SELECT chunk_id, vector_json FROM embeddings ORDER BY chunk_id").fetchall()
+    if not rows:
+        return {"status": "ok", "rows": 0}
+    first = json.loads(rows[0]["vector_json"])
+    if not isinstance(first, list) or not first:
+        return {"status": "skipped", "reason": "invalid embeddings"}
+    ensure_chunk_vectors_table(connection, len(first))
+    if not table_exists(connection, "chunk_vectors"):
+        return {"status": "skipped", "reason": "chunk_vectors table missing"}
+    for row in rows:
+        vec_raw = json.loads(row["vector_json"])
+        if not isinstance(vec_raw, list):
+            continue
+        vec = [float(x) for x in vec_raw]
+        _upsert_chunk_vector(connection, int(row["chunk_id"]), vec)
+    connection.commit()
+    return {"status": "ok", "rows": len(rows)}
+
+
 def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
     """Recompute ``entity_type``, re-key rows, and merge duplicates after normalization."""
     rows = connection.execute(
@@ -556,6 +716,7 @@ def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
             updated += 1
     merge_stats = _merge_and_rekey_entities(connection)
     _refresh_entity_mention_counts(connection)
+    _prune_orphan_entities(connection)
     connection.commit()
     mention_count = int(connection.execute("SELECT COUNT(*) AS c FROM entity_mentions").fetchone()["c"])
     entity_count = int(connection.execute("SELECT COUNT(*) AS c FROM entities").fetchone()["c"])

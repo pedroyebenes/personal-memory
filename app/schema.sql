@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS events (
     FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_name TEXT NOT NULL,
@@ -97,6 +102,14 @@ CREATE TABLE IF NOT EXISTS entity_mentions (
 
 CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON entity_mentions(entity_id);
 CREATE INDEX IF NOT EXISTS idx_entity_mentions_chunk ON entity_mentions(chunk_id);
+
+CREATE TABLE IF NOT EXISTS entity_embeddings (
+    entity_id INTEGER PRIMARY KEY,
+    model_name TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS document_summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

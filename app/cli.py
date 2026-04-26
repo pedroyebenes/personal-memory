@@ -8,7 +8,15 @@ import sys
 
 from app.config import format_diagnostics, load_settings
 from app.db import connect, init_db
-from app.ingest.register import ingest_vault, reclassify_entities, refresh_concepts, reindex_vault, status_summary
+from app.ingest.register import (
+    ingest_vault,
+    reclassify_entities,
+    rebuild_chunk_vectors,
+    rebuild_embeddings,
+    refresh_concepts,
+    reindex_vault,
+    status_summary,
+)
 from app.retrieval.concept_search import (
     CONCEPT_QUALITIES,
     concept_noise_report,
@@ -40,6 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
     reindex_parser.add_argument("--vault", required=False)
     reindex_parser.add_argument("--include", action="append", default=None, help="glob to include (relative to vault)")
     reindex_parser.add_argument("--exclude", action="append", default=None, help="glob to exclude (relative to vault)")
+
+    embeddings_parser = subparsers.add_parser("embeddings")
+    embeddings_sub = embeddings_parser.add_subparsers(dest="embeddings_command", required=True)
+    emb_rebuild = embeddings_sub.add_parser("rebuild")
+    emb_rebuild.add_argument(
+        "--no-breadcrumbs",
+        action="store_true",
+        help="Embed raw chunk text only (matches USE_BREADCRUMB_EMBEDDINGS=false)",
+    )
+
+    vectors_parser = subparsers.add_parser("vectors")
+    vectors_sub = vectors_parser.add_subparsers(dest="vectors_command", required=True)
+    vectors_sub.add_parser("rebuild")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("--query", required=True)
@@ -152,6 +173,19 @@ def main() -> None:
         if summary.get("failed"):
             sys.exit(2)
         return
+
+    if args.command == "embeddings":
+        if args.embeddings_command == "rebuild":
+            use_bc = False if args.no_breadcrumbs else None
+            print(json.dumps(rebuild_embeddings(connection, settings, use_breadcrumbs=use_bc), indent=2))
+            return
+        raise SystemExit(f"Unknown embeddings subcommand: {args.embeddings_command}")
+
+    if args.command == "vectors":
+        if args.vectors_command == "rebuild":
+            print(json.dumps(rebuild_chunk_vectors(connection), indent=2))
+            return
+        raise SystemExit(f"Unknown vectors subcommand: {args.vectors_command}")
 
     if args.command == "search":
         retrieval_query, warnings = resolve_retrieval_query(

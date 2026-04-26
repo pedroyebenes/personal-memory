@@ -93,6 +93,7 @@ You can still override any value with environment variables when needed:
 - `NVIDIA_API_KEY`
 - `NVIDIA_BASE_URL`
 - `OLLAMA_BASE_URL`
+- `USE_BREADCRUMB_EMBEDDINGS` (`true` / `false`) — when `true`, chunk embeddings include document title and heading path as context
 
 Defaults keep the system local-only. LLM synthesis and reranking are disabled unless explicitly enabled.
 
@@ -185,6 +186,21 @@ If you need a full rebuild instead of an incremental refresh, use:
 ```bash
 personal-memory reindex
 ```
+
+## Rebuilding derived layers
+
+Some SQLite tables are **derived** from your notes and can get out of date when algorithms change:
+
+| Layer | When it goes stale | Command |
+| --- | --- | --- |
+| Chunk text + FTS (`chunks`, `chunks_fts`) | Edits in the vault | `personal-memory ingest` (incremental) or `personal-memory reindex` (full) |
+| Chunk embeddings (`embeddings`) | You change embedding model, toggle breadcrumbs, or chunk boundaries change in code | `personal-memory embeddings rebuild` (optionally `--no-breadcrumbs` to match `USE_BREADCRUMB_EMBEDDINGS=false`) |
+| sqlite-vec ANN index (`chunk_vectors`) | After restore, first install of `sqlite-vec`, or if rows drifted | `personal-memory vectors rebuild` (no re-encoding; reads existing `vector_json`) |
+| Concept classification / merges (`entities`, `entity_mentions`) | After upgrading concept normalization or structural rules | `personal-memory concepts reclassify` |
+
+Heading **breadcrumbs** affect only what text is sent to the embedder (see `USE_BREADCRUMB_EMBEDDINGS` in `config.json` or the environment). After toggling breadcrumbs or fixing chunking, run `personal-memory embeddings rebuild` so semantic search matches the new policy.
+
+Optional ANN support: `pip install -e '.[vec]'` installs `sqlite-vec`. If the extension does not load, the app keeps using the existing Python cosine scan over `embeddings.vector_json`.
 
 ## Optional LLM Synthesis
 
