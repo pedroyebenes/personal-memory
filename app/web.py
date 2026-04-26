@@ -17,6 +17,7 @@ from app.config import Settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
+from app.processing.concepts import classify_entity_type, normalize_key
 from app.retrieval.concept_search import CONCEPT_QUALITIES, get_concept_detail, list_concepts
 from app.retrieval.evaluation import evaluate_retrieval_cases
 from app.retrieval.hybrid_search import hybrid_search
@@ -101,16 +102,7 @@ def _truncate(text: str, limit: int = 220) -> str:
 _VIZ_CAPITALIZED_PHRASE = re.compile(
     r"\b([A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*(?:\s+[A-ZÁÉÍÓÚÜÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9'’/-]*){1,4})\b"
 )
-_VIZ_STOP_TERMS = {
-    "chapter",
-    "capítulo",
-    "section",
-    "parte",
-    "libro",
-    "text",
-    "notes",
-    "untitled",
-}
+_VIZ_LABEL_STOP_NORMALIZED = frozenset({"text", "notes", "untitled"})
 
 
 def _cluster_name_from_rows(rows: list[sqlite3.Row]) -> dict[str, object]:
@@ -120,12 +112,19 @@ def _cluster_name_from_rows(rows: list[sqlite3.Row]) -> dict[str, object]:
         for value in (row["section_title"], row["document_title"]):
             label = str(value or "").strip()
             if label and len(label) <= 90:
+                if classify_entity_type(label, "heading") == "structure":
+                    continue
+                nk = normalize_key(label)
+                if nk in _VIZ_LABEL_STOP_NORMALIZED:
+                    continue
                 labels[label] += 1
         text = str(row["text"] or "")
         for match in _VIZ_CAPITALIZED_PHRASE.finditer(text):
             phrase = " ".join(match.group(1).split())
-            normalized = phrase.lower()
-            if normalized in _VIZ_STOP_TERMS or normalized.startswith(("chapter ", "capítulo ")):
+            if classify_entity_type(phrase, "heading") == "structure":
+                continue
+            nk = normalize_key(phrase)
+            if nk in _VIZ_LABEL_STOP_NORMALIZED:
                 continue
             phrases[phrase] += 1
 

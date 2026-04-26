@@ -7,7 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.db import connect, init_db
-from app.ingest.register import ingest_vault, refresh_concepts, reindex_vault
+from app.ingest.register import ingest_vault, reclassify_entities, refresh_concepts, reindex_vault
 from app.models import ChunkRecord, ParsedDocument
 from app.processing.concepts import (
     classify_entity_type,
@@ -57,12 +57,24 @@ def test_normalize_key_collapses_case_and_separators() -> None:
 def test_classify_entity_type_splits_structures_from_concepts() -> None:
     assert classify_entity_type("CAPÍTULO XL", "heading") == "structure"
     assert classify_entity_type("Capítulo XLII. Que trata de la venta", "heading") == "structure"
+    assert classify_entity_type("Capítulo IV: Donde se cuenta la estraña aventura", "heading") == "structure"
+    assert classify_entity_type("Chapter 3 — The Road Home", "heading") == "structure"
+    assert classify_entity_type("Prólogo", "heading") == "structure"
+    assert classify_entity_type("Parte Primera", "heading") == "structure"
     assert classify_entity_type("2026-04-20", "title") == "structure"
+    assert classify_entity_type("2026/04/20", "title") == "structure"
+    assert classify_entity_type("April 20, 2026", "title") == "structure"
+    assert classify_entity_type("20 abril 2026", "title") == "structure"
+    assert classify_entity_type("Monday", "heading") == "structure"
+    assert classify_entity_type("lunes", "heading") == "structure"
     assert classify_entity_type("2", "heading") == "structure"
     assert classify_entity_type("IV", "heading") == "structure"
     assert classify_entity_type("Text/intro2.xhtml", "heading") == "structure"
     assert classify_entity_type("Project North Star", "heading") == "concept"
+    assert classify_entity_type("Dulcinea del Toboso", "heading") == "concept"
     assert classify_entity_type("CAPÍTULO XL", "tag") == "concept"
+    assert classify_entity_type("Capítulo I", "alias") == "structure"
+    assert classify_entity_type("North Star", "alias") == "concept"
 
 
 def test_init_db_migrates_nonempty_legacy_entities(tmp_path: Path) -> None:
@@ -127,6 +139,21 @@ def test_extract_concept_mentions_covers_all_sources(tmp_path: Path) -> None:
     assert "project north star" in by_method["wikilink"]
     assert {"overview", "implementation plan"} == set(by_method["heading"])
     assert {mention.entity_type for mention in mentions} == {"concept"}
+
+
+def test_extract_concept_mentions_splits_structural_alias_from_title(tmp_path: Path) -> None:
+    chunks = [_make_chunk(0, None, "Body.")]
+    parsed = _doc(
+        tmp_path / "quijote.md",
+        title="El Quijote",
+        aliases=["Capítulo I", "Don Quijote"],
+    )
+    mentions = extract_concept_mentions(parsed, chunks)
+    by_key_method = {(m.normalized_key, m.extraction_method): m.entity_type for m in mentions}
+
+    assert by_key_method[("el quijote", "title")] == "concept"
+    assert by_key_method[("capítulo i", "alias")] == "structure"
+    assert by_key_method[("el quijote", "alias")] == "concept"
 
 
 def test_extract_concept_mentions_marks_structural_headings(tmp_path: Path) -> None:
@@ -587,6 +614,38 @@ def test_find_concepts_for_terms_returns_aliased_entities(connection, fixture_va
     assert "project north star" in keys
     # "project" and "project north star" both exist; tokens individually match the tag concept "project".
     assert "project" in keys
+
+
+def test_reclassify_entities_is_idempotent_and_preserves_mentions(
+    connection, tmp_path: Path, settings: Settings
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "daily.md").write_text("# Monday\n\nNotes.\n", encoding="utf-8")
+    ingest_vault(connection, vault, settings)
+    row = connection.execute("SELECT id FROM entities WHERE normalized_key = 'monday'").fetchone()
+    assert row is not None
+    connection.execute("UPDATE entities SET entity_type = 'concept' WHERE id = ?", (int(row["id"]),))
+    connection.commit()
+
+    mentions_before = connection.execute(
+        "SELECT entity_id, chunk_id, mention_text, extraction_method FROM entity_mentions ORDER BY id"
+    ).fetchall()
+
+    first = reclassify_entities(connection)
+    assert first["entities_updated"] >= 1
+    et = connection.execute("SELECT entity_type FROM entities WHERE id = ?", (int(row["id"]),)).fetchone()[
+        "entity_type"
+    ]
+    assert et == "structure"
+
+    second = reclassify_entities(connection)
+    assert second["entities_updated"] == 0
+
+    mentions_after = connection.execute(
+        "SELECT entity_id, chunk_id, mention_text, extraction_method FROM entity_mentions ORDER BY id"
+    ).fetchall()
+    assert [tuple(r) for r in mentions_after] == [tuple(r) for r in mentions_before]
 
 
 def test_find_concepts_for_terms_ignores_structures(connection, tmp_path: Path, settings: Settings) -> None:

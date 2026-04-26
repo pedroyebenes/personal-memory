@@ -8,7 +8,7 @@ import sys
 
 from app.config import format_diagnostics, load_settings
 from app.db import connect, init_db
-from app.ingest.register import ingest_vault, refresh_concepts, reindex_vault, status_summary
+from app.ingest.register import ingest_vault, reclassify_entities, refresh_concepts, reindex_vault, status_summary
 from app.retrieval.concept_search import (
     CONCEPT_QUALITIES,
     concept_noise_report,
@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     show_group.add_argument("--name", type=str, dest="concept_name")
 
     concepts_sub.add_parser("refresh")
+    concepts_sub.add_parser("reclassify")
     noise_parser = concepts_sub.add_parser("noise-report")
     noise_parser.add_argument("--limit", type=int, default=50)
 
@@ -220,6 +221,9 @@ def main() -> None:
             return
         if args.concepts_command == "refresh":
             print(json.dumps(refresh_concepts(connection), indent=2))
+            return
+        if args.concepts_command == "reclassify":
+            print(json.dumps(reclassify_entities(connection), indent=2))
             return
         if args.concepts_command == "noise-report":
             print(json.dumps(concept_noise_report(connection, limit=args.limit), indent=2))

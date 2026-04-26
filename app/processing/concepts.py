@@ -71,6 +71,16 @@ _BODY_STOP_PHRASES = {
     "all rights reserved",
     "public domain",
 }
+
+_MONTH_NAMES_EN_ES = (
+    "january|february|march|april|may|june|july|august|september|october|november|december|"
+    "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre"
+)
+_WEEKDAY_NAMES_EN_ES = (
+    "monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    "lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo"
+)
+
 _STRUCTURAL_LABEL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\d+$"),
     re.compile(r"^[ivxlcdm]+$"),
@@ -85,8 +95,33 @@ _STRUCTURAL_LABEL_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"^(?:cap[ií]tulo|chapter|part|parte|book|libro|section|secci[oó]n)\s+"
         r"(?:[ivxlcdm]+|\d+|primero|segundo|tercero|cuarto|quinto|sexto|s[eé]ptimo|octavo|noveno|d[eé]cimo)$"
     ),
+    # Subtitled chapter/section: "Capítulo IV: …", "Chapter 3 — …"
+    re.compile(
+        r"^(?:cap[ií]tulo|chapter|part|parte|book|libro|section|secci[oó]n|tomo)\s+"
+        r"\S+(?:\s*[:—–-]\s+.+)?$"
+    ),
+    # Front matter / back matter headings
+    re.compile(
+        r"^(?:pr[oó]logo|ep[ií]logo|introducci[oó]n|pref[aá]cio|dedicatoria|[ií]ndice|"
+        r"tabla\s+de\s+contenidos|glosario|ap[eé]ndice|nota\s+del\s+autor|acknowledgments?)\b"
+    ),
+    # Ordinals spelled out: "Parte Primera", "Libro Tercero"
+    re.compile(
+        r"^(?:parte|cap[ií]tulo|libro)\s+"
+        r"(?:primero|primera|segundo|segunda|tercero|tercera|cuarto|cuarta|quinto|quinta|"
+        r"sexto|sexta|s[eé]ptimo|s[eé]ptima|octavo|octava|noveno|novena|d[eé]cimo|d[eé]cima|"
+        r"und[eé]cimo|und[eé]cima|duod[eé]cimo|duod[eé]cima)\b"
+    ),
+    re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+    re.compile(r"^\d{4}/\d{2}/\d{2}$"),
+    re.compile(
+        rf"^(?:{_MONTH_NAMES_EN_ES})\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s*\d{{4}})?$"
+    ),
+    re.compile(rf"^\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTH_NAMES_EN_ES})(?:,?\s*\d{{4}})?$"),
+    re.compile(rf"^(?:{_WEEKDAY_NAMES_EN_ES})$"),
 )
-_STRUCTURAL_METHODS = {"heading", "title", "filename"}
+STRUCTURAL_CLASSIFICATION_METHODS: frozenset[str] = frozenset({"heading", "title", "filename", "alias"})
+_STRUCTURAL_METHODS = STRUCTURAL_CLASSIFICATION_METHODS
 
 
 EXTRACTION_METHODS: tuple[str, ...] = (
@@ -125,6 +160,17 @@ def classify_entity_type(value: str, method: str) -> str:
     key = normalize_key(value)
     if any(pattern.match(key) for pattern in _STRUCTURAL_LABEL_PATTERNS):
         return "structure"
+    return "concept"
+
+
+def entity_type_from_recorded_methods(canonical_name: str, methods: set[str]) -> str:
+    """Pick entity_type for an existing row given its canonical label and mention methods."""
+    structural = methods.intersection(STRUCTURAL_CLASSIFICATION_METHODS)
+    if not structural:
+        return "concept"
+    for method in sorted(structural):
+        if classify_entity_type(canonical_name, method) == "structure":
+            return "structure"
     return "concept"
 
 
@@ -305,6 +351,11 @@ def extract_concept_mentions(parsed: ParsedDocument, chunks: list[ChunkRecord]) 
     for alias in parsed.aliases:
         alias_key = normalize_key(alias)
         if not alias_key:
+            continue
+        if classify_entity_type(alias, "alias") == "structure":
+            structural_alias = _make_mention(alias, alias, "alias", first_chunk_index)
+            if structural_alias:
+                mentions.append(structural_alias)
             continue
         canonical = title_canonical if title_key else alias
         mentions.append(

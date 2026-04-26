@@ -8,7 +8,7 @@ from typing import Iterable
 from app.config import Settings
 from app.models import ChunkRecord, ParsedDocument
 from app.processing.chunker import chunk_document
-from app.processing.concepts import ConceptMention, extract_concept_mentions
+from app.processing.concepts import ConceptMention, entity_type_from_recorded_methods, extract_concept_mentions
 from app.processing.embeddings import embed_texts
 from app.util.hashing import sha256_text
 from app.util.logging import get_logger
@@ -427,6 +427,45 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
         "removed_document_ids": [],
         "pruned_entities": pruned_entities,
         "scope": {"include": list(include), "exclude": list(exclude)},
+    }
+
+
+def reclassify_entities(connection: sqlite3.Connection) -> dict[str, object]:
+    """Recompute ``entity_type`` from canonical names and recorded extraction methods.
+
+    Does not delete or rewrite ``entity_mentions`` rows.
+    """
+    rows = connection.execute(
+        """
+        SELECT e.id, e.canonical_name, e.entity_type,
+               GROUP_CONCAT(DISTINCT em.extraction_method) AS methods
+        FROM entities e
+        LEFT JOIN entity_mentions em ON em.entity_id = e.id
+        GROUP BY e.id
+        """
+    ).fetchall()
+    now = utc_now_iso()
+    updated = 0
+    for row in rows:
+        raw_methods = row["methods"]
+        methods = {m for m in (raw_methods.split(",") if raw_methods else []) if m}
+        canonical = str(row["canonical_name"] or "")
+        new_type = entity_type_from_recorded_methods(canonical, methods)
+        old_type = row["entity_type"] or "concept"
+        if new_type != old_type:
+            connection.execute(
+                "UPDATE entities SET entity_type = ?, updated_at = ? WHERE id = ?",
+                (new_type, now, int(row["id"])),
+            )
+            updated += 1
+    connection.commit()
+    mention_count = int(connection.execute("SELECT COUNT(*) AS c FROM entity_mentions").fetchone()["c"])
+    entity_count = int(connection.execute("SELECT COUNT(*) AS c FROM entities").fetchone()["c"])
+    return {
+        "entities_scanned": len(rows),
+        "entities_updated": updated,
+        "entity_mentions": mention_count,
+        "entities": entity_count,
     }
 
 
