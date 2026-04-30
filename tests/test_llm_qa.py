@@ -8,6 +8,9 @@ from app.retrieval import llm, qa
 
 def test_answer_question_falls_back_when_llm_unconfigured(connection, fixture_vault, settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
+    settings.synthesis_model_name = ""
+    settings.ollama_synthesis_model_name = ""
+
     response = qa.answer_question(connection, "What is North Star?", settings, top_k=2, use_llm=True)
     assert response["answer_mode"] == "extractive"
     assert response["warnings"]

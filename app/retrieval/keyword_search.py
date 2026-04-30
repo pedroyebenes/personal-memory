@@ -32,7 +32,7 @@ def _build_fts_query(query: str) -> str:
 def keyword_search(connection: sqlite3.Connection, query: str, top_k: int = 5) -> list[RetrievalResult]:
     fts_query = _build_fts_query(query)
     rows = connection.execute(
-        f"""
+        """
         SELECT
             c.id AS chunk_id,
             c.chunk_index,

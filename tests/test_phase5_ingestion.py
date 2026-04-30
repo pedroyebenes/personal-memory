@@ -4,8 +4,6 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
 from app.config import Settings, load_settings
 import json
 

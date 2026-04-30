@@ -8,7 +8,12 @@ __pycache__
 *.pyd
 *.egg-info
 build
+dist
+.ruff_cache
 data/cache
+data/exports
+data/raw
+data/vault
 data/huggingface
 data/sentence-transformers
 config.json

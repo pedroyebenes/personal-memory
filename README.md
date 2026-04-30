@@ -47,12 +47,13 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "ENABLE_LLM_SYNTHESIS": false,
   "ENABLE_QUERY_REWRITE": false,
   "ENABLE_RERANKING": false,
+  "ENABLE_CONCEPT_BOOST": false,
   "LLM_PROVIDER": "ollama",
   "SYNTHESIS_MODEL_NAME": null,
   "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
   "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
-  "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
-  "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma3",
+  "NVIDIA_SYNTHESIS_MODEL_NAME": "minimaxai/minimax-m2.7",
+  "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
   "OPENAI_API_KEY": null,
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "GEMINI_API_KEY": null,
@@ -211,7 +212,7 @@ Recommended local setup with Ollama:
 ```bash
 export ENABLE_LLM_SYNTHESIS=true
 export LLM_PROVIDER=ollama
-export SYNTHESIS_MODEL_NAME=gemma3
+export SYNTHESIS_MODEL_NAME=gemma4:e2b
 ```
 
 Then run:
@@ -298,7 +299,7 @@ Provider-specific configuration:
 # Ollama
 export LLM_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://localhost:11434/api
-export OLLAMA_SYNTHESIS_MODEL_NAME=gemma3
+export OLLAMA_SYNTHESIS_MODEL_NAME=gemma4:e2b
 
 # Gemini
 export LLM_PROVIDER=gemini
@@ -309,7 +310,7 @@ export GEMINI_SYNTHESIS_MODEL_NAME=gemini-2.5-flash
 export LLM_PROVIDER=nvidia
 export NVIDIA_API_KEY=your_nvidia_api_key
 export NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-export NVIDIA_SYNTHESIS_MODEL_NAME=z-ai/glm-4.7
+export NVIDIA_SYNTHESIS_MODEL_NAME=minimaxai/minimax-m2.7
 
 # OpenAI
 export LLM_PROVIDER=openai

@@ -11,7 +11,7 @@
   "SYNTHESIS_MODEL_NAME": null,
   "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
   "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
-  "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
+  "NVIDIA_SYNTHESIS_MODEL_NAME": "minimaxai/minimax-m2.7",
   "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
   "OPENAI_API_KEY": null,
   "OPENAI_BASE_URL": "https://api.openai.com/v1",

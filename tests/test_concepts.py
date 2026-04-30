@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-import pytest
 
 from app.config import Settings
 from app.db import connect, init_db

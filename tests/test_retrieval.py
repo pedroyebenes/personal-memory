@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from app.config import Settings
 from app.ingest.register import ingest_vault
 from app.models import SearchFilters
