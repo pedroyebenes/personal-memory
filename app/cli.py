@@ -25,7 +25,13 @@ from app.retrieval.concept_search import (
     list_concepts,
     semantic_concept_search,
 )
-from app.retrieval.evaluation import evaluate_retrieval
+from app.retrieval.evaluation import (
+    BUILTIN_CASE_SETS,
+    DEFAULT_REGRESSION_THRESHOLD,
+    diff_against_baseline,
+    evaluate_retrieval,
+    evaluate_retrieval_compare,
+)
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.retrieval.query_rewrite import resolve_retrieval_query
@@ -115,9 +121,36 @@ def build_parser() -> argparse.ArgumentParser:
     eval_sub = eval_parser.add_subparsers(dest="eval_command", required=True)
     retrieval_eval = eval_sub.add_parser("retrieval")
     retrieval_eval.add_argument("--cases", default=None, help="JSON file with retrieval evaluation cases")
+    retrieval_eval.add_argument(
+        "--builtin",
+        choices=sorted(BUILTIN_CASE_SETS.keys()),
+        default=None,
+        help="Use a bundled golden case set instead of --cases",
+    )
     retrieval_eval.add_argument("--top-k", type=int)
     retrieval_eval.add_argument("--rerank", action="store_true")
     retrieval_eval.add_argument("--concept-boost", action="store_true")
+    retrieval_eval.add_argument(
+        "--baseline",
+        default=None,
+        help="JSON file with a saved eval payload; current run is diffed against it and the process exits non-zero on regression",
+    )
+    retrieval_eval.add_argument(
+        "--regression-threshold",
+        type=float,
+        default=DEFAULT_REGRESSION_THRESHOLD,
+        help=f"Maximum allowed drop in any aggregate metric vs baseline (default: {DEFAULT_REGRESSION_THRESHOLD})",
+    )
+    retrieval_eval.add_argument(
+        "--save",
+        default=None,
+        help="If set, write the eval payload to this path (useful for capturing a baseline)",
+    )
+    retrieval_eval.add_argument(
+        "--compare",
+        action="store_true",
+        help="Run several preset retrieval configurations against the same cases and emit a side-by-side report",
+    )
     return parser
 
 
@@ -292,17 +325,49 @@ def main() -> None:
     if args.command == "eval":
         if args.eval_command == "retrieval":
             cases_path = Path(args.cases).expanduser().resolve() if args.cases else None
+            if args.cases and args.builtin:
+                raise SystemExit("--cases and --builtin are mutually exclusive")
+            if args.compare:
+                payload = evaluate_retrieval_compare(
+                    connection,
+                    settings,
+                    cases_path=cases_path,
+                    builtin=args.builtin,
+                    top_k=args.top_k,
+                )
+                print(json.dumps(payload, indent=2))
+                if args.save:
+                    Path(args.save).expanduser().resolve().write_text(
+                        json.dumps(payload, indent=2), encoding="utf-8"
+                    )
+                return
             payload = evaluate_retrieval(
                 connection,
                 settings,
                 cases_path=cases_path,
+                builtin=args.builtin,
                 top_k=args.top_k,
                 use_rerank=args.rerank or None,
                 use_concept_boost=args.concept_boost or None,
             )
+            exit_code = 0
+            if args.baseline:
+                baseline_path = Path(args.baseline).expanduser().resolve()
+                baseline_payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+                payload["baseline_diff"] = diff_against_baseline(
+                    payload, baseline_payload, threshold=args.regression_threshold
+                )
+                if payload["baseline_diff"]["regressed"]:
+                    exit_code = max(exit_code, 3)
             print(json.dumps(payload, indent=2))
+            if args.save:
+                Path(args.save).expanduser().resolve().write_text(
+                    json.dumps(payload, indent=2), encoding="utf-8"
+                )
             if payload["status"] == "failed":
-                sys.exit(2)
+                exit_code = max(exit_code, 2)
+            if exit_code:
+                sys.exit(exit_code)
             return
         raise SystemExit(f"Unknown eval subcommand: {args.eval_command}")
 

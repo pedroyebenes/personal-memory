@@ -1,0 +1,42 @@
+{
+  "name": "fixture-vault",
+  "description": "Golden cases tied to tests/fixtures/vault. Ingest that vault before running.",
+  "cases": [
+    {
+      "id": "north-star-launch",
+      "query": "North Star launch plan",
+      "expected_paths": ["project-note.md"],
+      "expected_terms": ["launch"]
+    },
+    {
+      "id": "hybrid-ranking",
+      "query": "weighted hybrid ranking strategy",
+      "expected_paths": ["project-note.md"],
+      "expected_terms": ["hybrid"]
+    },
+    {
+      "id": "weekly-review",
+      "query": "weekly review decisions",
+      "expected_paths": ["plain-note.md"],
+      "expected_terms": ["sqlite"]
+    },
+    {
+      "id": "wikilinks-survival",
+      "query": "wikilinks survive parsing",
+      "expected_paths": ["wiki-links.md"],
+      "expected_terms": ["wikilinks"]
+    },
+    {
+      "id": "local-first",
+      "query": "local first ingestion design",
+      "expected_paths": ["plain-note.md"],
+      "expected_terms": []
+    },
+    {
+      "id": "provenance",
+      "query": "provenance and inspectable pipelines",
+      "expected_paths": ["project-note.md"],
+      "expected_terms": ["provenance"]
+    }
+  ]
+}
