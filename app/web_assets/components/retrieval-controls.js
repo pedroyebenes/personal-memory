@@ -9,6 +9,7 @@ const PROVIDERS = [
   { value: "gemini", label: "Gemini" },
   { value: "nvidia", label: "NVIDIA" },
   { value: "openai", label: "OpenAI" },
+  { value: "mlx_lm", label: "MLX-LM" },
 ];
 
 export function buildRetrievalControls({ store }) {

@@ -54,13 +54,15 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
   "NVIDIA_SYNTHESIS_MODEL_NAME": "minimaxai/minimax-m2.7",
   "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
+  "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/gemma-4-e4b-it-8bit",
   "OPENAI_API_KEY": null,
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "GEMINI_API_KEY": null,
   "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
   "NVIDIA_API_KEY": null,
   "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
-  "OLLAMA_BASE_URL": "http://localhost:11434/api"
+  "OLLAMA_BASE_URL": "http://localhost:11434/api",
+  "MLX_LM_BASE_URL": "http://localhost:8080/v1"
 }
 ```
 
@@ -87,6 +89,7 @@ You can still override any value with environment variables when needed:
 - `GEMINI_SYNTHESIS_MODEL_NAME`
 - `NVIDIA_SYNTHESIS_MODEL_NAME`
 - `OLLAMA_SYNTHESIS_MODEL_NAME`
+- `MLX_LM_SYNTHESIS_MODEL_NAME`
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
 - `GEMINI_API_KEY`
@@ -94,6 +97,7 @@ You can still override any value with environment variables when needed:
 - `NVIDIA_API_KEY`
 - `NVIDIA_BASE_URL`
 - `OLLAMA_BASE_URL`
+- `MLX_LM_BASE_URL`
 - `USE_BREADCRUMB_EMBEDDINGS` (`true` / `false`) — when `true`, chunk embeddings include document title and heading path as context
 
 Defaults keep the system local-only. LLM synthesis and reranking are disabled unless explicitly enabled.
@@ -301,6 +305,11 @@ export LLM_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://localhost:11434/api
 export OLLAMA_SYNTHESIS_MODEL_NAME=gemma4:e2b
 
+# MLX-LM local server
+export LLM_PROVIDER=mlx_lm
+export MLX_LM_BASE_URL=http://localhost:8080/v1
+export MLX_LM_SYNTHESIS_MODEL_NAME=mlx-community/gemma-4-e4b-it-8bit
+
 # Gemini
 export LLM_PROVIDER=gemini
 export GEMINI_API_KEY=your_gemini_key
@@ -337,7 +346,7 @@ personal-memory web --host 0.0.0.0 --port 8000
 
 The chat page now includes:
 
-- an `Ollama` / `Gemini` / `NVIDIA` / `OpenAI` provider selector
+- an `Ollama` / `MLX-LM` / `Gemini` / `NVIDIA` / `OpenAI` provider selector
 - a model textbox next to the provider selector, prefilled from that provider's configured default
 - a `Use LLM synthesis for answers` toggle
 - a `Rewrite natural-language query before retrieval` toggle

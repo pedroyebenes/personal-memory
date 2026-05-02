@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from app.config import Settings
+from app.config import Settings, normalize_provider_name
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
@@ -888,7 +888,7 @@ def _read_top_k(value: object, default: int) -> int:
 
 
 def _resolve_provider(settings: Settings, provider_value: object) -> str:
-    provider = str(provider_value or settings.llm_provider).strip().lower() or settings.llm_provider
+    provider = normalize_provider_name(str(provider_value or settings.llm_provider)) or settings.llm_provider
     if not settings.is_supported_provider(provider):
         raise APIError(
             "invalid_provider",

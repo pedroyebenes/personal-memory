@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-SUPPORTED_LLM_PROVIDERS = ("ollama", "openai", "gemini", "nvidia")
+SUPPORTED_LLM_PROVIDERS = ("ollama", "openai", "gemini", "nvidia", "mlx_lm")
 DEFAULT_DATABASE_PATH = Path("data/cache/memory.sqlite3")
 DEFAULT_CONFIG_PATH = Path("config.json")
 DEFAULT_EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -23,10 +23,16 @@ DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME = "gpt-5-mini"
 DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME = "gemini-2.5-flash"
 DEFAULT_NVIDIA_SYNTHESIS_MODEL_NAME = "minimaxai/minimax-m2.7"
 DEFAULT_OLLAMA_SYNTHESIS_MODEL_NAME = "gemma4:e2b"
+DEFAULT_MLX_LM_SYNTHESIS_MODEL_NAME = "mlx-community/gemma-4-e4b-it-8bit"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/api"
+DEFAULT_MLX_LM_BASE_URL = "http://localhost:8080/v1"
+
+
+def normalize_provider_name(provider: str | None) -> str:
+    return (provider or "").strip().lower().replace("-", "_")
 
 
 @dataclass(slots=True)
@@ -45,6 +51,7 @@ class Settings:
     gemini_synthesis_model_name: str = DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME
     nvidia_synthesis_model_name: str = DEFAULT_NVIDIA_SYNTHESIS_MODEL_NAME
     ollama_synthesis_model_name: str = DEFAULT_OLLAMA_SYNTHESIS_MODEL_NAME
+    mlx_lm_synthesis_model_name: str = DEFAULT_MLX_LM_SYNTHESIS_MODEL_NAME
     openai_api_key: str | None = None
     openai_base_url: str = DEFAULT_OPENAI_BASE_URL
     gemini_api_key: str | None = None
@@ -52,18 +59,19 @@ class Settings:
     nvidia_api_key: str | None = None
     nvidia_base_url: str = DEFAULT_NVIDIA_BASE_URL
     ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    mlx_lm_base_url: str = DEFAULT_MLX_LM_BASE_URL
     ingest_include: tuple[str, ...] = ()
     ingest_exclude: tuple[str, ...] = ()
     use_breadcrumb_embeddings: bool = DEFAULT_USE_BREADCRUMB_EMBEDDINGS
 
     def is_supported_provider(self, provider: str | None = None) -> bool:
-        provider_name = (provider or self.llm_provider).strip().lower()
+        provider_name = normalize_provider_name(provider or self.llm_provider)
         return provider_name in SUPPORTED_LLM_PROVIDERS
 
     def get_synthesis_model_name(self, provider: str | None = None) -> str | None:
         if self.synthesis_model_name:
             return self.synthesis_model_name
-        provider_name = (provider or self.llm_provider).strip().lower()
+        provider_name = normalize_provider_name(provider or self.llm_provider)
         if provider_name == "openai":
             return self.openai_synthesis_model_name
         if provider_name == "gemini":
@@ -72,6 +80,8 @@ class Settings:
             return self.nvidia_synthesis_model_name
         if provider_name == "ollama":
             return self.ollama_synthesis_model_name
+        if provider_name == "mlx_lm":
+            return self.mlx_lm_synthesis_model_name
         return None
 
     def synthesis_model_defaults(self) -> dict[str, str]:
@@ -80,10 +90,11 @@ class Settings:
             "gemini": self.gemini_synthesis_model_name,
             "nvidia": self.nvidia_synthesis_model_name,
             "ollama": self.ollama_synthesis_model_name,
+            "mlx_lm": self.mlx_lm_synthesis_model_name,
         }
 
     def provider_config(self, provider: str | None = None) -> dict[str, str | None]:
-        provider_name = (provider or self.llm_provider).strip().lower()
+        provider_name = normalize_provider_name(provider or self.llm_provider)
         return {
             "provider": provider_name,
             "model_name": self.get_synthesis_model_name(provider_name),
@@ -92,17 +103,19 @@ class Settings:
                 "gemini": self.gemini_base_url,
                 "nvidia": self.nvidia_base_url,
                 "ollama": self.ollama_base_url,
+                "mlx_lm": self.mlx_lm_base_url,
             }.get(provider_name),
             "api_key": {
                 "openai": self.openai_api_key,
                 "gemini": self.gemini_api_key,
                 "nvidia": self.nvidia_api_key,
                 "ollama": None,
+                "mlx_lm": None,
             }.get(provider_name),
         }
 
     def provider_diagnostics(self, provider: str | None = None) -> list[dict[str, str]]:
-        provider_name = (provider or self.llm_provider).strip().lower()
+        provider_name = normalize_provider_name(provider or self.llm_provider)
         diagnostics: list[dict[str, str]] = []
         if not self.is_supported_provider(provider_name):
             diagnostics.append(
@@ -116,7 +129,8 @@ class Settings:
 
         provider_config = self.provider_config(provider_name)
         model_name = str(provider_config.get("model_name") or "").strip()
-        if not model_name:
+        model_optional = provider_name in {"mlx_lm"}
+        if not model_name and not model_optional:
             diagnostics.append(
                 {
                     "code": "missing_provider_model",
@@ -288,6 +302,7 @@ def load_settings(config_path: str | None = None) -> Settings:
     gemini_synthesis_value = os.getenv("GEMINI_SYNTHESIS_MODEL_NAME", file_values.get("GEMINI_SYNTHESIS_MODEL_NAME"))
     nvidia_synthesis_value = os.getenv("NVIDIA_SYNTHESIS_MODEL_NAME", file_values.get("NVIDIA_SYNTHESIS_MODEL_NAME"))
     ollama_synthesis_value = os.getenv("OLLAMA_SYNTHESIS_MODEL_NAME", file_values.get("OLLAMA_SYNTHESIS_MODEL_NAME"))
+    mlx_lm_synthesis_value = os.getenv("MLX_LM_SYNTHESIS_MODEL_NAME", file_values.get("MLX_LM_SYNTHESIS_MODEL_NAME"))
     openai_api_key = os.getenv("OPENAI_API_KEY", file_values.get("OPENAI_API_KEY"))
     openai_base_url = os.getenv("OPENAI_BASE_URL", file_values.get("OPENAI_BASE_URL"))
     gemini_api_key = os.getenv("GEMINI_API_KEY", file_values.get("GEMINI_API_KEY"))
@@ -295,6 +310,7 @@ def load_settings(config_path: str | None = None) -> Settings:
     nvidia_api_key = os.getenv("NVIDIA_API_KEY", file_values.get("NVIDIA_API_KEY"))
     nvidia_base_url = os.getenv("NVIDIA_BASE_URL", file_values.get("NVIDIA_BASE_URL"))
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", file_values.get("OLLAMA_BASE_URL"))
+    mlx_lm_base_url = os.getenv("MLX_LM_BASE_URL", file_values.get("MLX_LM_BASE_URL"))
     ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
     ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
     breadcrumb_emb_value = os.getenv("USE_BREADCRUMB_EMBEDDINGS", file_values.get("USE_BREADCRUMB_EMBEDDINGS"))
@@ -316,12 +332,13 @@ def load_settings(config_path: str | None = None) -> Settings:
         enable_query_rewrite=_parse_bool(rewrite_value, DEFAULT_ENABLE_QUERY_REWRITE),
         enable_reranking=_parse_bool(reranking_value, DEFAULT_ENABLE_RERANKING),
         enable_concept_boost=_parse_bool(concept_boost_value, DEFAULT_ENABLE_CONCEPT_BOOST),
-        llm_provider=(provider_value or DEFAULT_LLM_PROVIDER).strip().lower(),
+        llm_provider=normalize_provider_name(provider_value or DEFAULT_LLM_PROVIDER),
         synthesis_model_name=synthesis_value,
         openai_synthesis_model_name=openai_synthesis_value or DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME,
         gemini_synthesis_model_name=gemini_synthesis_value or DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME,
         nvidia_synthesis_model_name=nvidia_synthesis_value or DEFAULT_NVIDIA_SYNTHESIS_MODEL_NAME,
         ollama_synthesis_model_name=ollama_synthesis_value or synthesis_value or DEFAULT_OLLAMA_SYNTHESIS_MODEL_NAME,
+        mlx_lm_synthesis_model_name=mlx_lm_synthesis_value or DEFAULT_MLX_LM_SYNTHESIS_MODEL_NAME,
         openai_api_key=openai_api_key,
         openai_base_url=openai_base_url or DEFAULT_OPENAI_BASE_URL,
         gemini_api_key=gemini_api_key,
@@ -329,6 +346,7 @@ def load_settings(config_path: str | None = None) -> Settings:
         nvidia_api_key=nvidia_api_key,
         nvidia_base_url=nvidia_base_url or DEFAULT_NVIDIA_BASE_URL,
         ollama_base_url=ollama_base_url or DEFAULT_OLLAMA_BASE_URL,
+        mlx_lm_base_url=mlx_lm_base_url or DEFAULT_MLX_LM_BASE_URL,
         ingest_include=_parse_pattern_list(ingest_include_value),
         ingest_exclude=_parse_pattern_list(ingest_exclude_value),
         use_breadcrumb_embeddings=_parse_bool(breadcrumb_emb_value, DEFAULT_USE_BREADCRUMB_EMBEDDINGS),

@@ -13,11 +13,13 @@
   "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
   "NVIDIA_SYNTHESIS_MODEL_NAME": "minimaxai/minimax-m2.7",
   "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
+  "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/gemma-4-e4b-it-8bit",
   "OPENAI_API_KEY": null,
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "GEMINI_API_KEY": null,
   "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
   "NVIDIA_API_KEY": null,
   "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
-  "OLLAMA_BASE_URL": "http://localhost:11434/api"
+  "OLLAMA_BASE_URL": "http://localhost:11434/api",
+  "MLX_LM_BASE_URL": "http://localhost:8080/v1"
 }

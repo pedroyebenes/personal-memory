@@ -59,6 +59,45 @@ def test_nvidia_chat_completions_parser_handles_string_content() -> None:
     assert llm._extract_chat_completions_text(result, provider_name="NVIDIA") == "Grounded answer [Source 1]"
 
 
+def test_mlx_lm_chat_completions_parser_handles_string_message() -> None:
+    result = {
+        "choices": [
+            {
+                "message": "Grounded answer [Source 1]",
+            }
+        ]
+    }
+
+    assert llm._extract_chat_completions_text(result, provider_name="MLX-LM") == "Grounded answer [Source 1]"
+
+
+def test_mlx_lm_generate_uses_chat_completions_without_required_model(settings, monkeypatch) -> None:
+    settings.llm_provider = "mlx_lm"
+    settings.synthesis_model_name = None
+    settings.mlx_lm_synthesis_model_name = ""
+    settings.mlx_lm_base_url = "http://localhost:8080/v1"
+    captured = {}
+
+    def fake_post_json(url, headers, payload):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "Grounded answer [Source 1]"}}]}
+
+    monkeypatch.setattr(llm, "_post_json", fake_post_json)
+
+    answer = llm._generate_text("Question and sources", settings, "System instruction")
+
+    assert answer == "Grounded answer [Source 1]"
+    assert captured["url"] == "http://localhost:8080/v1/chat/completions"
+    assert captured["headers"] == {"Content-Type": "application/json"}
+    assert captured["payload"]["messages"] == [
+        {"role": "system", "content": "System instruction"},
+        {"role": "user", "content": "Question and sources"},
+    ]
+    assert "model" not in captured["payload"]
+
+
 def test_post_json_explains_localhost_misconfiguration_in_container(monkeypatch) -> None:
     def fake_urlopen(req, timeout=60):
         raise error.URLError(ConnectionRefusedError(111, "Connection refused"))

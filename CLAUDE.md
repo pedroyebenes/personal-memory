@@ -60,7 +60,7 @@ This is a local-first personal knowledge system that indexes Obsidian Markdown v
 - **SQLite is authoritative**: `app/schema.sql` defines the core tables (including FTS5); `app/db.py` runs idempotent migrations (`schema_meta`, missing columns, `entity_embeddings`, lazy `chunk_vectors` with sqlite-vec)
 - **Rebuilding**: changing chunking or breadcrumb embedding policy requires `personal-memory embeddings rebuild`. The ANN table `chunk_vectors` is derivative JSON; refresh it with `personal-memory vectors rebuild` after backups or extension install. `personal-memory reindex` rebuilds chunks and FTS from notes but does not require a separate FTS rebuild command today.
 - **Models** (`app/models.py`): `ParsedDocument`, `ChunkRecord`, `RetrievalResult`, `SearchFilters` are the main dataclasses passed between layers
-- **Multi-provider LLM** (`app/retrieval/llm.py`): supports Ollama, OpenAI, Gemini, NVIDIA — provider/model selected per-request in the web UI or via config
+- **Multi-provider LLM** (`app/retrieval/llm.py`): supports Ollama, MLX-LM, OpenAI, Gemini, NVIDIA — provider/model selected per-request in the web UI or via config
 - **Config hierarchy** (`app/config.py`): JSON config file → environment variables → hardcoded defaults. Docker uses `config_docker.json` as the template.
 
 ### Web UI

@@ -83,6 +83,26 @@ def test_load_settings_reads_nvidia_config(tmp_path: Path) -> None:
     assert settings.get_synthesis_model_name() == "z-ai/glm-4.7"
 
 
+def test_load_settings_reads_mlx_lm_config_and_normalizes_provider(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        """
+        {
+          "LLM_PROVIDER": "mlx-lm",
+          "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
+          "MLX_LM_BASE_URL": "http://localhost:8080/v1"
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider == "mlx_lm"
+    assert settings.mlx_lm_base_url == "http://localhost:8080/v1"
+    assert settings.get_synthesis_model_name() == "mlx-community/Mistral-7B-Instruct-v0.3-4bit"
+
+
 def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
@@ -92,7 +112,8 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
           "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
           "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
           "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
-          "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b"
+          "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
+          "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/Qwen3-4B-4bit"
         }
         """.strip(),
         encoding="utf-8",
@@ -104,6 +125,7 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
     assert settings.get_synthesis_model_name("gemini") == "gemini-2.5-flash"
     assert settings.get_synthesis_model_name("nvidia") == "z-ai/glm-4.7"
     assert settings.get_synthesis_model_name("ollama") == "gemma4:e2b"
+    assert settings.get_synthesis_model_name("mlx-lm") == "mlx-community/Qwen3-4B-4bit"
 
 
 def test_provider_availability_marks_missing_keys() -> None:
@@ -118,6 +140,7 @@ def test_provider_availability_marks_missing_keys() -> None:
     assert availability["openai"]["available"] is False
     assert availability["gemini"]["available"] is False
     assert availability["nvidia"]["available"] is False
+    assert availability["mlx_lm"]["available"] is True
 
 
 def test_validate_reports_invalid_provider_and_missing_vault(tmp_path: Path) -> None:

@@ -39,6 +39,12 @@ def test_main_module_wires_router_and_all_views() -> None:
     assert 'buildStatusBar' in main
 
 
+def test_retrieval_controls_include_mlx_lm_provider() -> None:
+    controls = _read_web_asset("components/retrieval-controls.js")
+
+    assert '{ value: "mlx_lm", label: "MLX-LM" }' in controls
+
+
 def test_chat_view_rerenders_when_workspace_payload_changes() -> None:
     chat = _read_web_asset("views/chat.js")
     assert 'store.onMany(["activeWorkspaceId", "workspaces"]' in chat

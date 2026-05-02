@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib import error, request
 from urllib.parse import urlparse
 
-from app.config import Settings
+from app.config import Settings, normalize_provider_name
 
 
 class LLMConfigurationError(RuntimeError):
@@ -26,8 +26,8 @@ def _augment_connection_error(url: str, reason: object) -> str:
     if _running_in_container() and _is_localhost_url(url):
         return (
             f"{detail}. The app appears to be running in a container, where localhost points to the "
-            f"container itself. Set OLLAMA_BASE_URL to a host-reachable address such as "
-            f"http://host.docker.internal:11434/api."
+            f"container itself. Set the selected provider's base URL to a host-reachable address, "
+            f"for example http://host.docker.internal:11434/api for Ollama."
         )
     return detail
 
@@ -65,7 +65,7 @@ def _build_prompt(question: str, sources: list[dict[str, object]]) -> str:
 
 
 def _generate_text(prompt: str, settings: Settings, system_instruction: str) -> str:
-    provider = settings.llm_provider.strip().lower()
+    provider = normalize_provider_name(settings.llm_provider)
     model_name = settings.get_synthesis_model_name(provider)
     if provider == "openai":
         if not settings.openai_api_key:
@@ -123,6 +123,22 @@ def _generate_text(prompt: str, settings: Settings, system_instruction: str) -> 
             payload,
         )
         return _extract_chat_completions_text(result, provider_name="NVIDIA")
+    if provider == "mlx_lm":
+        payload: dict[str, object] = {
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+        }
+        if model_name:
+            payload["model"] = model_name
+        result = _post_json(
+            settings.mlx_lm_base_url.rstrip("/") + "/chat/completions",
+            {"Content-Type": "application/json"},
+            payload,
+        )
+        return _extract_chat_completions_text(result, provider_name="MLX-LM")
     if provider == "ollama":
         if not model_name:
             raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
@@ -203,6 +219,8 @@ def _extract_chat_completions_text(result: dict[str, object], provider_name: str
         if not isinstance(choice, dict):
             continue
         message = choice.get("message", {})
+        if isinstance(message, str) and message.strip():
+            return message.strip()
         if not isinstance(message, dict):
             continue
         content = message.get("content")
