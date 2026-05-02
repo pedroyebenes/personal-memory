@@ -1,0 +1,134 @@
+/* Design tokens for the v2 shell. Single source of truth for color, type,
+   spacing, motion. Components consume these custom properties only. */
+
+:root {
+  /* Surfaces */
+  --pm-bg-base:     #12121f;
+  --pm-bg-canvas:   #0d0d18;
+  --pm-bg-panel:    rgba(12, 12, 26, 0.9);
+  --pm-bg-overlay:  rgba(10, 10, 24, 0.97);
+  --pm-bg-hover:    rgba(255, 255, 255, 0.045);
+  --pm-bg-active:   rgba(255, 255, 255, 0.07);
+
+  /* Borders */
+  --pm-border:      rgba(255, 255, 255, 0.07);
+  --pm-border-soft: rgba(255, 255, 255, 0.045);
+  --pm-border-strong: rgba(255, 255, 255, 0.14);
+
+  /* Foreground */
+  --pm-fg:          #e8e8f4;
+  --pm-fg-muted:    #8a8a9c;
+  --pm-fg-dim:      #555;
+  --pm-fg-faint:    #3a3a4c;
+
+  /* Accent (sage from current viz palette) */
+  --pm-accent:        #9ecfb8;
+  --pm-accent-hover:  #b3d8c4;
+  --pm-accent-soft:   rgba(158, 207, 184, 0.14);
+  --pm-accent-line:   rgba(158, 207, 184, 0.28);
+  --pm-accent-strong: rgba(158, 207, 184, 0.45);
+
+  /* Semantic */
+  --pm-noise:       #55556a;
+  --pm-warning:     #d4af37;
+  --pm-error:       #e07878;
+
+  /* Type */
+  --pm-font-serif:  Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  --pm-font-sans:   system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --pm-font-mono:   ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --pm-text-xs:   0.68rem;
+  --pm-text-sm:   0.78rem;
+  --pm-text-md:   0.88rem;
+  --pm-text-lg:   1.05rem;
+  --pm-text-xl:   1.4rem;
+
+  --pm-leading-tight:  1.3;
+  --pm-leading-normal: 1.5;
+  --pm-leading-loose:  1.65;
+
+  /* Spacing — 4px scale */
+  --pm-sp-1:  4px;
+  --pm-sp-2:  8px;
+  --pm-sp-3:  12px;
+  --pm-sp-4:  16px;
+  --pm-sp-5:  20px;
+  --pm-sp-6:  24px;
+  --pm-sp-8:  32px;
+  --pm-sp-10: 40px;
+
+  /* Radius */
+  --pm-radius-sm: 4px;
+  --pm-radius-md: 6px;
+  --pm-radius-lg: 8px;
+  --pm-radius-pill: 999px;
+
+  /* Motion */
+  --pm-ease:      cubic-bezier(0.4, 0, 0.2, 1);
+  --pm-dur-fast:  120ms;
+  --pm-dur-base:  180ms;
+  --pm-dur-slow:  280ms;
+
+  /* Effects */
+  --pm-blur:        blur(12px);
+  --pm-shadow-md:   0 10px 32px rgba(0, 0, 0, 0.5);
+  --pm-shadow-lg:   0 20px 60px rgba(0, 0, 0, 0.7);
+
+  /* Subtle elevation surfaces — themed separately so light mode can
+     introduce contrast without inverting the meaning. */
+  --pm-bg-rail:    rgba(12, 12, 26, 0.6);
+  --pm-bg-card:    rgba(255, 255, 255, 0.025);
+  --pm-bg-inset:   rgba(0, 0, 0, 0.22);
+  --pm-text-shadow-strong: 0 1px 2px rgba(0, 0, 0, 0.7);
+  --pm-bg-tooltip: rgba(12, 12, 26, 0.72);
+
+  /* Layout */
+  --pm-nav-h:       48px;
+  --pm-status-h:    32px;
+  --pm-rail-w:      280px;
+}
+
+/* ── Light theme override ────────────────────────────
+   Activated by setting `data-theme="light"` on the root or body element.
+   Components consume these tokens, so flipping the data attribute
+   re-themes the entire UI. The 3D map scene reads --pm-bg-base from
+   computed styles on remount; switching theme while the map is mounted
+   requires re-entering the route to repaint the canvas/fog. */
+[data-theme="light"] {
+  --pm-bg-base:     #f7f4ec;          /* parchment */
+  --pm-bg-canvas:   #ffffff;
+  --pm-bg-panel:    rgba(255, 253, 247, 0.92);
+  --pm-bg-overlay:  rgba(255, 253, 247, 0.98);
+  --pm-bg-hover:    rgba(0, 0, 0, 0.04);
+  --pm-bg-active:   rgba(0, 0, 0, 0.07);
+
+  --pm-border:      rgba(0, 0, 0, 0.10);
+  --pm-border-soft: rgba(0, 0, 0, 0.06);
+  --pm-border-strong: rgba(0, 0, 0, 0.18);
+
+  --pm-fg:          #1f1f28;
+  --pm-fg-muted:    #5d5d6c;
+  --pm-fg-dim:      #8a8a98;
+  --pm-fg-faint:    #c8c8d0;
+
+  /* Deepen the sage so contrast against parchment stays clear. */
+  --pm-accent:        #3f7c63;
+  --pm-accent-hover:  #2f6650;
+  --pm-accent-soft:   rgba(63, 124, 99, 0.12);
+  --pm-accent-line:   rgba(63, 124, 99, 0.32);
+  --pm-accent-strong: rgba(63, 124, 99, 0.55);
+
+  --pm-noise:       #999;
+  --pm-warning:     #a37d12;
+  --pm-error:       #b04545;
+
+  --pm-shadow-md:   0 4px 18px rgba(0, 0, 0, 0.10);
+  --pm-shadow-lg:   0 12px 40px rgba(0, 0, 0, 0.18);
+
+  --pm-bg-rail:    rgba(0, 0, 0, 0.025);
+  --pm-bg-card:    rgba(0, 0, 0, 0.025);
+  --pm-bg-inset:   rgba(0, 0, 0, 0.045);
+  --pm-text-shadow-strong: 0 1px 2px rgba(255, 255, 255, 0.65);
+  --pm-bg-tooltip: rgba(255, 253, 247, 0.92);
+}

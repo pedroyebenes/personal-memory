@@ -1,0 +1,78 @@
+/* Element resets + global typography. Dark observatory baseline. */
+
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  background: var(--pm-bg-base);
+  color: var(--pm-fg);
+  font-family: var(--pm-font-serif);
+  font-size: var(--pm-text-md);
+  line-height: var(--pm-leading-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--pm-accent);
+  text-decoration: none;
+}
+a:hover { color: var(--pm-accent-hover); }
+a:focus-visible { outline: 2px solid var(--pm-accent-strong); outline-offset: 2px; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-md);
+  padding: var(--pm-sp-2) var(--pm-sp-3);
+  cursor: pointer;
+  transition: background var(--pm-dur-fast) var(--pm-ease),
+              border-color var(--pm-dur-fast) var(--pm-ease);
+}
+button:hover { background: var(--pm-bg-hover); }
+button:focus-visible { outline: 2px solid var(--pm-accent-strong); outline-offset: 2px; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.pm-primary {
+  background: var(--pm-accent-soft);
+  border-color: var(--pm-accent-line);
+  color: var(--pm-accent);
+}
+button.pm-primary:hover {
+  background: var(--pm-accent-line);
+  color: var(--pm-accent-hover);
+}
+
+input, textarea, select {
+  font: inherit;
+  color: var(--pm-fg);
+  background: var(--pm-bg-hover);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  padding: var(--pm-sp-2) var(--pm-sp-3);
+  outline: none;
+  transition: border-color var(--pm-dur-fast) var(--pm-ease);
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--pm-accent-strong);
+}
+input::placeholder, textarea::placeholder { color: var(--pm-fg-dim); }
+
+textarea { resize: vertical; min-height: 4em; }
+
+::selection { background: var(--pm-accent-soft); color: var(--pm-fg); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--pm-border-strong); border-radius: var(--pm-radius-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--pm-fg-dim); }
+::-webkit-scrollbar-track { background: transparent; }
+
+h1, h2, h3 { font-weight: normal; }
+h1 { font-size: var(--pm-text-xl); }
+h2 { font-size: var(--pm-text-lg); }
+h3 { font-size: var(--pm-text-md); color: var(--pm-fg-muted); text-transform: uppercase;
+     letter-spacing: 0.08em; font-size: var(--pm-text-xs); }

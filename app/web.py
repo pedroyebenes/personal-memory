@@ -29,18 +29,50 @@ from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.util.timestamps import utc_now_iso
 
-WEB_ASSET_CONTENT_TYPES = {
-    "index.html": "text/html; charset=utf-8",
-    "viz.html": "text/html; charset=utf-8",
-    "styles.css": "text/css; charset=utf-8",
-    "app.js": "application/javascript; charset=utf-8",
-    "favicon.svg": "image/svg+xml",
+WEB_ASSETS_ROOT = Path(__file__).with_name("web_assets").resolve()
+
+STATIC_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".woff2": "font/woff2",
+    ".ico": "image/x-icon",
+    ".map": "application/json; charset=utf-8",
 }
 
 
+def _resolve_static(rel: str) -> Path | None:
+    """Resolve a static asset path under web_assets/ with traversal protection.
+
+    Returns None if the path escapes the web_assets directory, points at a
+    non-file, or has an extension we do not serve.
+    """
+    if not rel or "\x00" in rel:
+        return None
+    cleaned = rel.lstrip("/")
+    candidate = (WEB_ASSETS_ROOT / cleaned).resolve()
+    try:
+        candidate.relative_to(WEB_ASSETS_ROOT)
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    if candidate.suffix.lower() not in STATIC_CONTENT_TYPES:
+        return None
+    return candidate
+
+
 def _read_web_asset(name: str) -> str:
-    asset_path = Path(__file__).with_name("web_assets") / name
-    return asset_path.read_text(encoding="utf-8")
+    """Read a static asset as text (kept for compatibility with existing tests)."""
+    candidate = _resolve_static(name)
+    if candidate is None:
+        raise FileNotFoundError(name)
+    return candidate.read_text(encoding="utf-8")
 
 
 class APIError(RuntimeError):
@@ -1102,6 +1134,99 @@ def handle_api_get(
         return HTTPStatus.OK, _success_payload(
             {"query": raw_q, "top_k": top_k, "concepts": ranked}
         )
+    if parsed.path.rstrip("/") == "/api/documents":
+        def _list_documents(connection: sqlite3.Connection) -> list[dict[str, object]]:
+            rows = connection.execute(
+                """
+                SELECT d.id, d.title, d.source_path, d.last_modified,
+                       COUNT(c.id) AS chunk_count
+                FROM documents d
+                LEFT JOIN chunks c ON c.document_id = d.id
+                GROUP BY d.id
+                ORDER BY d.title COLLATE NOCASE
+                """,
+            ).fetchall()
+            return [
+                {
+                    "document_id": int(r["id"]),
+                    "title": str(r["title"]),
+                    "source_path": str(r["source_path"]),
+                    "last_modified": str(r["last_modified"]),
+                    "chunk_count": int(r["chunk_count"]),
+                }
+                for r in rows
+            ]
+
+        documents = with_connection(_list_documents)
+        return HTTPStatus.OK, _success_payload({"documents": documents, "count": len(documents)})
+    if parsed.path.rstrip("/") == "/api/concepts/graph":
+        query_params = parse_qs(parsed.query)
+        try:
+            limit = max(10, min(500, int(query_params.get("limit", ["200"])[0])))
+        except (TypeError, ValueError):
+            limit = 200
+        try:
+            min_cooc = max(1, int(query_params.get("min_cooccurrence", ["2"])[0]))
+        except (TypeError, ValueError):
+            min_cooc = 2
+        try:
+            edge_limit = max(50, min(5000, int(query_params.get("edge_limit", ["1000"])[0])))
+        except (TypeError, ValueError):
+            edge_limit = 1000
+
+        def _concept_graph(connection: sqlite3.Connection) -> dict[str, object]:
+            nodes_rows = connection.execute(
+                """
+                SELECT id, canonical_name, entity_type, mention_count
+                FROM entities
+                WHERE COALESCE(entity_type, 'concept') != 'structure'
+                  AND mention_count > 0
+                ORDER BY mention_count DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            nodes = [
+                {
+                    "id": int(r["id"]),
+                    "canonical_name": str(r["canonical_name"]),
+                    "entity_type": (str(r["entity_type"]) if r["entity_type"] is not None else "concept"),
+                    "mention_count": int(r["mention_count"]),
+                }
+                for r in nodes_rows
+            ]
+            if not nodes:
+                return {"nodes": [], "edges": [], "limit": limit, "min_cooccurrence": min_cooc}
+            ids = tuple(n["id"] for n in nodes)
+            placeholders = ",".join("?" for _ in ids)
+            edges_rows = connection.execute(
+                f"""
+                SELECT m1.entity_id AS a, m2.entity_id AS b,
+                       COUNT(DISTINCT m1.chunk_id) AS weight
+                FROM entity_mentions m1
+                JOIN entity_mentions m2
+                  ON m1.chunk_id = m2.chunk_id
+                 AND m1.entity_id < m2.entity_id
+                WHERE m1.entity_id IN ({placeholders})
+                  AND m2.entity_id IN ({placeholders})
+                GROUP BY m1.entity_id, m2.entity_id
+                HAVING weight >= ?
+                ORDER BY weight DESC
+                LIMIT ?
+                """,
+                (*ids, *ids, min_cooc, edge_limit),
+            ).fetchall()
+            edges = [
+                {"a": int(r["a"]), "b": int(r["b"]), "weight": int(r["weight"])}
+                for r in edges_rows
+            ]
+            return {
+                "nodes": nodes, "edges": edges,
+                "limit": limit, "min_cooccurrence": min_cooc, "edge_limit": edge_limit,
+            }
+
+        payload = with_connection(_concept_graph)
+        return HTTPStatus.OK, _success_payload(payload)
     if parsed.path.startswith("/api/documents/"):
         suffix = parsed.path[len("/api/documents/") :].strip("/")
         if not suffix:
@@ -1318,16 +1443,17 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
                     self._send_asset("index.html")
                     return
                 if parsed.path == "/viz":
-                    self._send_asset("viz.html")
-                    return
-                if parsed.path == "/static/styles.css":
-                    self._send_asset("styles.css")
-                    return
-                if parsed.path == "/static/app.js":
-                    self._send_asset("app.js")
+                    self.send_response(HTTPStatus.FOUND)
+                    self.send_header("Location", "/#/map")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
                     return
                 if parsed.path in ("/favicon.svg", "/favicon.ico"):
                     self._send_asset("favicon.svg")
+                    return
+                if parsed.path.startswith("/static/"):
+                    rel = parsed.path[len("/static/"):]
+                    self._send_asset(rel)
                     return
                 status, response = handle_api_get(self.path, settings, refresh_state, self._with_connection)
                 self._send_json(response, status=status)
@@ -1385,14 +1511,28 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
             return payload if isinstance(payload, dict) else {}
 
         def _send_asset(self, name: str, status: HTTPStatus = HTTPStatus.OK) -> None:
-            encoded = _read_web_asset(name).encode("utf-8")
+            candidate = _resolve_static(name)
+            if candidate is None:
+                self._send_json(
+                    _error_payload(
+                        APIError(
+                            "not_found",
+                            f"Static asset not found: {name}",
+                            status=HTTPStatus.NOT_FOUND,
+                        )
+                    ),
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            payload = candidate.read_bytes()
+            content_type = STATIC_CONTENT_TYPES[candidate.suffix.lower()]
             self.send_response(status)
-            self.send_header("Content-Type", WEB_ASSET_CONTENT_TYPES[name])
+            self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Pragma", "no-cache")
-            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(encoded)
+            self.wfile.write(payload)
 
         def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
             encoded = json.dumps(payload, indent=2).encode("utf-8")

@@ -10,64 +10,57 @@ from app import web
 from app.web import APIError, RefreshState, _error_payload, _read_web_asset, handle_api_get, handle_api_post
 
 
-def test_web_assets_are_split_and_linked() -> None:
+def test_shell_loads_design_tokens_and_main_module() -> None:
+    """The single-page shell at / pulls in tokens, base, shell, components CSS,
+    and the main.js entry. The actual views are loaded as ES modules from main.js."""
     html = _read_web_asset("index.html")
-    viz_html = _read_web_asset("viz.html")
-    css = _read_web_asset("styles.css")
-    js = _read_web_asset("app.js")
 
-    assert '<link rel="stylesheet" href="/static/styles.css">' in html
-    assert '<script src="/static/app.js"></script>' in html
-    assert "HTML_PAGE" not in html
-    assert 'id="top-k"' in html
-    assert 'placeholder="books/ or projects/"' in html
-    assert ".layout" in css
-    assert "function renderAnswerWorkspaces" in js
-    assert "function loadConcepts" in js
-    assert "function renderEvalResults" in js
-    assert "top_k: readTopK()" in js
-    assert "vault path:" in js
-    assert 'id="concepts-tab"' in html
-    assert 'id="eval-tab"' in html
-    assert 'id="search-view"' in html
-    assert 'id="concepts-view"' in html
-    assert 'id="eval-view"' in html
-    assert '<form id="search-form" class="main-search-form">' in html
-    assert 'aria-label="Controls drawer"' in html
-    assert 'id="search-pane"' not in html
-    assert 'id="concepts-pane"' not in html
-    assert 'id="concept-boost-results"' in html
-    assert 'id="eval-cases"' in html
-    assert ">Top K<" in html
-    assert ">Rerank<" in html
-    assert ">Concept boost<" in html
-    assert ">Advanced<" in html
-    assert 'id="help-button"' in html
-    assert 'id="help-dialog"' in html
-    assert "helpDialog.showModal" in js
-    assert 'id="active-filter-summary"' in html
-    assert 'data-sidebar-view="answers search"' in html
-    assert 'data-sidebar-view="concepts"' in html
-    assert 'data-sidebar-view="eval"' in html
-    assert 'data-sidebar-view="search"' not in html
-    assert html.index('id="saved-searches"') > html.index('id="search-results"')
-    assert html.index('id="recent-queries"') > html.index('id="search-results"')
-    assert html.index('id="concept-results"') > html.index('id="concepts-view"')
-    assert html.index('id="eval-results"') > html.index('id="eval-view"')
-    assert "Saved Searches</h2>" not in html
-    assert "Recent Queries</h2>" not in html
-    assert ".main-subsections" in css
-    assert ".nested-panel" in css
-    assert ".summary-note" in css
-    assert "const sidebarSections" in js
-    assert "const activeFilterSummary" in js
-    assert "section.hidden = !views.includes(name)" in js
-    assert ".sidebar-section[hidden]" in css
-    assert 'id="viz-search"' in viz_html
-    assert 'displayConceptTitle' in viz_html
-    assert 'id="np-maximize"' in viz_html
-    assert 'id="np-font-larger"' in viz_html
-    assert 'id="np-font-smaller"' in viz_html
+    # CSS layered: tokens -> base -> shell -> components.
+    assert '/static/styles/tokens.css' in html
+    assert '/static/styles/base.css' in html
+    assert '/static/styles/shell.css' in html
+    assert '/static/styles/components.css' in html
+    # Entry point is an ES module.
+    assert '<script type="module" src="/static/shell/main.js">' in html
+    # Importmap for Three.js (required by views/map.js).
+    assert 'three.module.js' in html
+    # The shell mounts views into #view-mount and the nav into #pm-header.
+    assert 'id="view-mount"' in html
+    assert 'id="pm-header"' in html
+
+
+def test_main_module_wires_router_and_all_views() -> None:
+    main = _read_web_asset("shell/main.js")
+    for view in ("chat", "search", "map", "graph", "docs"):
+        assert f'../views/{view}.js' in main, view
+    assert 'createRouter' in main
+    assert 'createStore' in main
+    assert 'buildNav' in main
+    assert 'buildStatusBar' in main
+
+
+def test_chat_view_rerenders_when_workspace_payload_changes() -> None:
+    chat = _read_web_asset("views/chat.js")
+    assert 'store.onMany(["activeWorkspaceId", "workspaces"]' in chat
+    assert 'replaceWorkspace(store, ws)' in chat
+
+
+def test_design_tokens_define_observatory_palette() -> None:
+    tokens = _read_web_asset("styles/tokens.css")
+    # The single source of truth for color/type/spacing tokens.
+    for token in ("--pm-bg-base", "--pm-fg", "--pm-accent", "--pm-font-serif",
+                  "--pm-radius-md", "--pm-blur"):
+        assert token in tokens, token
+
+
+def test_legacy_assets_have_been_removed() -> None:
+    """After the v2 cutover the old hand-rolled UI files no longer exist."""
+    for legacy in ("app.js", "styles.css", "viz.html", "v2.html"):
+        try:
+            _read_web_asset(legacy)
+        except FileNotFoundError:
+            continue
+        raise AssertionError(f"legacy asset still present: {legacy}")
 
 
 def test_viz_api_returns_named_clusters(connection, fixture_vault: Path, settings: Settings) -> None:
@@ -101,6 +94,54 @@ def test_document_by_id_api_returns_raw_text(connection, fixture_vault: Path, se
     assert "title" in payload
     assert "raw_text" in payload
     assert len(payload["raw_text"]) > 0
+
+
+def test_documents_listing_api(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get("/api/documents", settings, RefreshState(), with_connection)
+
+    assert int(status) == 200
+    assert payload["ok"] is True
+    assert payload["count"] == len(payload["documents"])
+    assert payload["count"] > 0
+    first = payload["documents"][0]
+    for key in ("document_id", "title", "source_path", "last_modified", "chunk_count"):
+        assert key in first, key
+    assert all(d["chunk_count"] >= 0 for d in payload["documents"])
+
+
+def test_concepts_graph_api(connection, fixture_vault: Path, settings: Settings) -> None:
+    ingest_vault(connection, fixture_vault, settings)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_get(
+        "/api/concepts/graph?limit=50&min_cooccurrence=1",
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["ok"] is True
+    assert isinstance(payload["nodes"], list)
+    assert isinstance(payload["edges"], list)
+    if payload["nodes"]:
+        for key in ("id", "canonical_name", "entity_type", "mention_count"):
+            assert key in payload["nodes"][0], key
+    for e in payload["edges"]:
+        assert e["a"] != e["b"]
+        assert e["weight"] >= 1
+
+
+def test_static_handler_blocks_traversal(tmp_path: Path) -> None:
+    from app.web import _resolve_static
+    assert _resolve_static("../web.py") is None
+    assert _resolve_static("/etc/passwd") is None
+    assert _resolve_static("does/not/exist.js") is None
+    assert _resolve_static("index.html") is not None
+    assert _resolve_static("shell/main.js") is not None
 
 
 def test_status_reports_config_diagnostics(tmp_path: Path) -> None:

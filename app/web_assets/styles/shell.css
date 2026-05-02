@@ -1,0 +1,128 @@
+/* App shell: header (nav + status), main view mount. */
+
+.pm-app {
+  display: grid;
+  grid-template-rows: var(--pm-nav-h) 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.pm-header {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--pm-border);
+  background: var(--pm-bg-panel);
+  backdrop-filter: var(--pm-blur);
+  -webkit-backdrop-filter: var(--pm-blur);
+}
+
+/* ── Nav ─────────────────────────────────────────────── */
+.pm-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.pm-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--pm-sp-2);
+  padding: 0 var(--pm-sp-4);
+  font-size: var(--pm-text-sm);
+  color: var(--pm-fg-muted);
+  border-right: 1px solid var(--pm-border-soft);
+}
+.pm-brand-mark { color: var(--pm-accent); font-size: var(--pm-text-md); }
+
+.pm-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pm-sp-2);
+  padding: 0 var(--pm-sp-4);
+  color: var(--pm-fg-muted);
+  font-size: var(--pm-text-sm);
+  letter-spacing: 0.02em;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  transition: color var(--pm-dur-fast) var(--pm-ease),
+              border-color var(--pm-dur-fast) var(--pm-ease),
+              background var(--pm-dur-fast) var(--pm-ease);
+}
+.pm-nav-link:hover { color: var(--pm-fg); background: var(--pm-bg-hover); }
+.pm-nav-link[aria-current="page"] {
+  color: var(--pm-fg);
+  border-bottom-color: var(--pm-accent);
+}
+.pm-nav-glyph {
+  font-size: var(--pm-text-md);
+  color: var(--pm-accent);
+  opacity: 0.85;
+}
+.pm-nav-link[aria-current="page"] .pm-nav-glyph { opacity: 1; }
+
+/* ── Status bar (right side of header) ──────────────── */
+.pm-status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--pm-sp-3);
+  padding: 0 var(--pm-sp-4);
+  font-size: var(--pm-text-xs);
+  color: var(--pm-fg-muted);
+}
+
+.pm-status-stats { display: flex; align-items: center; gap: var(--pm-sp-3); }
+.pm-status-stats .pm-status-item strong { color: var(--pm-fg); font-weight: normal; }
+.pm-status-stats .pm-status-sep { color: var(--pm-fg-faint); }
+
+.pm-status-warning { color: var(--pm-warning); }
+.pm-status-error   { color: var(--pm-error); }
+
+.pm-status-refresh {
+  font-size: var(--pm-text-xs);
+  padding: 4px var(--pm-sp-3);
+  border-radius: var(--pm-radius-pill);
+}
+
+/* ── Main view mount ───────────────────────────────── */
+.pm-main {
+  position: relative;
+  overflow: hidden;
+  background: var(--pm-bg-base);
+}
+
+.pm-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pm-fg-muted);
+  font-style: italic;
+  font-size: var(--pm-text-sm);
+  letter-spacing: 0.02em;
+}
+
+.pm-placeholder::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(158, 207, 184, 0.04) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+}
+
+/* Toggleable kbd hint */
+.pm-kbd {
+  display: inline-block;
+  font-family: var(--pm-font-mono);
+  font-size: var(--pm-text-xs);
+  padding: 1px 5px;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  color: var(--pm-fg-muted);
+  margin: 0 2px;
+}
