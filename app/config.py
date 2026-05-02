@@ -296,7 +296,11 @@ def load_settings(config_path: str | None = None) -> Settings:
     rewrite_value = os.getenv("ENABLE_QUERY_REWRITE", file_values.get("ENABLE_QUERY_REWRITE"))
     reranking_value = os.getenv("ENABLE_RERANKING", file_values.get("ENABLE_RERANKING"))
     concept_boost_value = os.getenv("ENABLE_CONCEPT_BOOST", file_values.get("ENABLE_CONCEPT_BOOST"))
-    provider_value = os.getenv("LLM_PROVIDER", file_values.get("LLM_PROVIDER"))
+    provider_value = os.getenv("LLM_PROVIDER")
+    if provider_value is None:
+        provider_value = os.getenv("DEFAULT_LLM_PROVIDER")
+    if provider_value is None:
+        provider_value = file_values.get("DEFAULT_LLM_PROVIDER", file_values.get("LLM_PROVIDER"))
     synthesis_value = os.getenv("SYNTHESIS_MODEL_NAME", file_values.get("SYNTHESIS_MODEL_NAME"))
     openai_synthesis_value = os.getenv("OPENAI_SYNTHESIS_MODEL_NAME", file_values.get("OPENAI_SYNTHESIS_MODEL_NAME"))
     gemini_synthesis_value = os.getenv("GEMINI_SYNTHESIS_MODEL_NAME", file_values.get("GEMINI_SYNTHESIS_MODEL_NAME"))

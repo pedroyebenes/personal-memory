@@ -45,8 +45,9 @@ export const docsView = {
       const path = (f.path_prefix || "").trim();
       const q = search.value.trim().toLowerCase();
       return docs.filter((d) => {
-        if (path && !d.source_path.startsWith(path)) return false;
-        if (q && !`${d.title} ${d.source_path}`.toLowerCase().includes(q)) return false;
+        const displayPath = docTreePath(d);
+        if (path && !d.source_path.startsWith(path) && !displayPath.startsWith(path)) return false;
+        if (q && !`${d.title} ${displayPath} ${d.source_path}`.toLowerCase().includes(q)) return false;
         return true;
       });
     }
@@ -67,11 +68,12 @@ export const docsView = {
         const fullPath = prefix ? `${prefix}/${key}` : key;
         if (child.doc) {
           const isActive = selectedPath === child.doc.source_path;
+          const displayPath = docTreePath(child.doc);
           wrap.appendChild(h("button", {
             type: "button",
             class: "pm-legend-item" + (isActive ? " active" : ""),
             style: { paddingLeft: "var(--pm-sp-2)", fontSize: "var(--pm-text-sm)" },
-            title: child.doc.source_path,
+            title: child.doc.source_path === displayPath ? displayPath : `${displayPath}\n${child.doc.source_path}`,
             onclick: () => openDoc(child.doc),
           }, [
             h("span", { class: "pm-legend-text" }, [
@@ -95,7 +97,7 @@ export const docsView = {
     function buildTree(docs) {
       const root = { children: {}, doc: null };
       for (const d of docs) {
-        const parts = (d.source_path || "").split("/").filter(Boolean);
+        const parts = docTreePath(d).split("/").filter(Boolean);
         let node = root;
         for (let i = 0; i < parts.length; i++) {
           const part = parts[i];
@@ -119,19 +121,20 @@ export const docsView = {
       try {
         const doc = await getDocument(d.document_id);
         const obsidianHref = `obsidian://open?path=${encodeURIComponent(d.source_path)}`;
+        const displayPath = doc.vault_relative_path || d.vault_relative_path || d.source_path;
         mount(reader,
           h("section", { class: "pm-section" }, [
             h("div", { class: "pm-section-title" }, "Document"),
             h("h2", null, doc.title || d.title),
             h("div", { class: "pm-evidence-meta" }, [
-              h("span", { class: "pm-evidence-path" }, doc.source_path || d.source_path),
+              h("span", { class: "pm-evidence-path", title: doc.source_path || d.source_path }, displayPath),
               h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
               h("span", null, `${d.chunk_count} chunks`),
               h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
               h("a", { href: obsidianHref, class: "pm-chip pm-chip-muted" }, "Open in Obsidian ↗"),
               h("button", { type: "button", class: "pm-chip pm-chip-muted",
                 onclick: () => {
-                  store.set({ filters: { ...(store.get("filters") || {}), path_prefix: pathPrefix(d.source_path) } });
+                  store.set({ filters: { ...(store.get("filters") || {}), path_prefix: pathPrefix(displayPath) } });
                   location.hash = "#/chat";
                 },
               }, "Use as filter"),
@@ -153,15 +156,20 @@ export const docsView = {
     }
 
     function openByPath(path) {
-      const d = documents.find((x) => x.source_path === path);
+      const d = documents.find((x) => x.source_path === path || x.vault_relative_path === path);
       if (d) openDoc(d);
     }
 
     function pathPrefix(path) {
       const parts = (path || "").split("/").filter(Boolean);
       parts.pop(); // drop filename
-      // Drop the absolute prefix down to a useful folder; keep last 2 components.
+      if (!parts.length) return "";
+      // Keep the nearest folders so filters stay readable.
       return parts.slice(-2).join("/") + "/";
+    }
+
+    function docTreePath(d) {
+      return d.vault_relative_path || d.source_path || "";
     }
 
     search.addEventListener("input", renderTree);

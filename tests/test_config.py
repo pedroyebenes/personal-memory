@@ -51,6 +51,15 @@ def test_environment_variables_override_json_config(
     assert settings.llm_provider == "openai"
 
 
+def test_load_settings_reads_default_llm_provider_alias(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"DEFAULT_LLM_PROVIDER": "gemini"}', encoding="utf-8")
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider == "gemini"
+
+
 def test_load_settings_reads_reranking_flag(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text('{"ENABLE_RERANKING": false}', encoding="utf-8")

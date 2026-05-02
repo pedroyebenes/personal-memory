@@ -129,17 +129,22 @@ export const chatView = {
         ]),
         h("div", { style: { whiteSpace: "pre-wrap", lineHeight: "var(--pm-leading-loose)" } }, ws.answer || ""),
       ]);
-      const meta = h("div", { class: "pm-evidence-meta" }, [
-        h("span", null, `Provider: ${ws.provider || "—"}`),
-        h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
-        h("span", null, `Model: ${ws.model || "default"}`),
-        h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
+      const metaItems = [
         h("span", null, `Top K: ${ws.retrieval?.topK ?? ws.top_k ?? "—"}`),
         h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
         h("span", null, `Rerank: ${ws.retrieval?.rerank ? "on" : "off"}`),
         h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
         h("span", null, `Concept boost: ${ws.retrieval?.conceptBoost ? "on" : "off"}`),
-      ]);
+      ];
+      if (ws.retrieval?.useLlm || ws.answer_mode === "llm_synthesis") {
+        metaItems.unshift(
+          h("span", null, `Provider: ${ws.provider || "—"}`),
+          h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
+          h("span", null, `Model: ${ws.model || "default"}`),
+          h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
+        );
+      }
+      const meta = h("div", { class: "pm-evidence-meta" }, metaItems);
       const sources = h("div", { class: "pm-section" }, [
         h("div", { class: "pm-section-title" }, `Evidence (${(ws.sources || []).length})`),
         ws.sources?.length
@@ -224,8 +229,8 @@ async function seedRetrievalDefaults(store) {
         conceptBoost: !!status.enable_concept_boost,
         useLlm: false,
         rewrite: false,
-        provider: status.llm_provider || "ollama",
-        model: status.provider_defaults?.[status.llm_provider || "ollama"] || "",
+        provider: status.default_llm_provider || status.llm_provider || "ollama",
+        model: status.provider_defaults?.[status.default_llm_provider || status.llm_provider || "ollama"] || "",
       },
       providerDefaults: status.provider_defaults || {},
       providerAvailability: status.provider_availability || {},

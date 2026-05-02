@@ -66,18 +66,13 @@ export function buildRetrievalControls({ store }) {
     h("label", { class: "pm-field" }, [h("span", null, "Top K"), topK]),
     h("label", { class: "pm-toggle" }, [rerank, h("span", null, "Rerank")]),
     h("label", { class: "pm-toggle" }, [conceptBoost, h("span", null, "Concept boost")]),
-    h("details", { class: "pm-section" }, [
-      h("summary", { style: { cursor: "pointer", fontSize: "var(--pm-text-xs)", color: "var(--pm-fg-muted)" } }, "Advanced"),
-      h("div", { class: "pm-section", style: { marginTop: "var(--pm-sp-2)" } }, [
-        h("div", { class: "pm-field-row" }, [
-          h("label", { class: "pm-field" }, [h("span", null, "Provider"), provider]),
-          h("label", { class: "pm-field" }, [h("span", null, "Model"),    model]),
-        ]),
-        providerStatus,
-        h("label", { class: "pm-toggle" }, [useLlm,  h("span", null, "LLM synthesis")]),
-        h("label", { class: "pm-toggle" }, [rewrite, h("span", null, "Query rewrite")]),
-      ]),
+    h("div", { class: "pm-field-row" }, [
+      h("label", { class: "pm-field" }, [h("span", null, "Provider"), provider]),
+      h("label", { class: "pm-field" }, [h("span", null, "Model"),    model]),
     ]),
+    providerStatus,
+    h("label", { class: "pm-toggle" }, [useLlm,  h("span", null, "LLM synthesis")]),
+    h("label", { class: "pm-toggle" }, [rewrite, h("span", null, "Query rewrite")]),
   ]);
 
   syncFromStore();

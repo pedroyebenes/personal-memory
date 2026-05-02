@@ -56,7 +56,26 @@ export function buildStatusBar({ store }) {
       items.push(h("span", { class: "pm-status-item" }, [h("strong", null, `${(cov * 100).toFixed(0)}%`), " embedded"]));
     }
     mount(stats, ...items);
-    if (store) store.set({ status: payload });
+    if (store) {
+      const provider = payload.default_llm_provider || payload.llm_provider || "ollama";
+      const patch = {
+        status: payload,
+        providerDefaults: payload.provider_defaults || {},
+        providerAvailability: payload.provider_availability || {},
+      };
+      if (!store.get("retrieval")) {
+        patch.retrieval = {
+          topK: payload.top_k ?? 5,
+          rerank: !!payload.enable_reranking,
+          conceptBoost: !!payload.enable_concept_boost,
+          useLlm: false,
+          rewrite: false,
+          provider,
+          model: payload.provider_defaults?.[provider] || "",
+        };
+      }
+      store.set(patch);
+    }
   }
 
   function renderWarning(text) {

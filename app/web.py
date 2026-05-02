@@ -1044,6 +1044,15 @@ def _serialize_filters(filters: SearchFilters) -> dict[str, object]:
     }
 
 
+def _vault_relative_path(source_path: str, settings: Settings) -> str:
+    if settings.vault_path is None:
+        return source_path
+    try:
+        return Path(source_path).expanduser().resolve().relative_to(settings.vault_path.resolve()).as_posix()
+    except ValueError:
+        return source_path
+
+
 def handle_api_get(
     path: str,
     settings: Settings,
@@ -1057,6 +1066,7 @@ def handle_api_get(
         summary["refresh_available"] = settings.vault_path is not None
         summary["refresh_state"] = refresh_state.snapshot()
         summary["llm_provider"] = settings.llm_provider
+        summary["default_llm_provider"] = settings.llm_provider
         summary["provider_defaults"] = settings.synthesis_model_defaults()
         summary["provider_availability"] = settings.provider_availability()
         summary["enable_reranking"] = settings.enable_reranking
@@ -1151,6 +1161,7 @@ def handle_api_get(
                     "document_id": int(r["id"]),
                     "title": str(r["title"]),
                     "source_path": str(r["source_path"]),
+                    "vault_relative_path": _vault_relative_path(str(r["source_path"]), settings),
                     "last_modified": str(r["last_modified"]),
                     "chunk_count": int(r["chunk_count"]),
                 }
@@ -1158,7 +1169,13 @@ def handle_api_get(
             ]
 
         documents = with_connection(_list_documents)
-        return HTTPStatus.OK, _success_payload({"documents": documents, "count": len(documents)})
+        return HTTPStatus.OK, _success_payload(
+            {
+                "documents": documents,
+                "count": len(documents),
+                "vault_path": str(settings.vault_path) if settings.vault_path else None,
+            }
+        )
     if parsed.path.rstrip("/") == "/api/concepts/graph":
         query_params = parse_qs(parsed.query)
         try:
@@ -1251,6 +1268,7 @@ def handle_api_get(
             return {
                 "document_id": int(row["id"]),
                 "source_path": str(row["source_path"]),
+                "vault_relative_path": _vault_relative_path(str(row["source_path"]), settings),
                 "title": str(row["title"]),
                 "raw_text": str(row["raw_text"]),
             }

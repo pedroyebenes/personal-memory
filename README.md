@@ -48,6 +48,7 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "ENABLE_QUERY_REWRITE": false,
   "ENABLE_RERANKING": false,
   "ENABLE_CONCEPT_BOOST": false,
+  "DEFAULT_LLM_PROVIDER": "ollama",
   "LLM_PROVIDER": "ollama",
   "SYNTHESIS_MODEL_NAME": null,
   "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",

@@ -45,10 +45,27 @@ def test_retrieval_controls_include_mlx_lm_provider() -> None:
     assert '{ value: "mlx_lm", label: "MLX-LM" }' in controls
 
 
+def test_retrieval_controls_show_llm_options_without_advanced_dropdown() -> None:
+    controls = _read_web_asset("components/retrieval-controls.js")
+
+    assert "Advanced" not in controls
+    assert 'h("details"' not in controls
+    assert "LLM synthesis" in controls
+    assert "Query rewrite" in controls
+
+
 def test_chat_view_rerenders_when_workspace_payload_changes() -> None:
     chat = _read_web_asset("views/chat.js")
     assert 'store.onMany(["activeWorkspaceId", "workspaces"]' in chat
     assert 'replaceWorkspace(store, ws)' in chat
+
+
+def test_chat_view_only_shows_provider_for_llm_answers() -> None:
+    chat = _read_web_asset("views/chat.js")
+
+    assert 'ws.retrieval?.useLlm || ws.answer_mode === "llm_synthesis"' in chat
+    assert "Provider:" in chat
+    assert "Model:" in chat
 
 
 def test_design_tokens_define_observatory_palette() -> None:
@@ -87,6 +104,7 @@ def test_viz_api_returns_named_clusters(connection, fixture_vault: Path, setting
 
 def test_document_by_id_api_returns_raw_text(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
+    settings.vault_path = fixture_vault
     with_connection = lambda callback: callback(connection)
 
     _, viz = handle_api_get("/api/viz", settings, RefreshState(), with_connection)
@@ -99,11 +117,13 @@ def test_document_by_id_api_returns_raw_text(connection, fixture_vault: Path, se
     assert payload["source_path"]
     assert "title" in payload
     assert "raw_text" in payload
+    assert payload["vault_relative_path"] == Path(payload["source_path"]).relative_to(fixture_vault).as_posix()
     assert len(payload["raw_text"]) > 0
 
 
 def test_documents_listing_api(connection, fixture_vault: Path, settings: Settings) -> None:
     ingest_vault(connection, fixture_vault, settings)
+    settings.vault_path = fixture_vault
     with_connection = lambda callback: callback(connection)
 
     status, payload = handle_api_get("/api/documents", settings, RefreshState(), with_connection)
@@ -113,8 +133,10 @@ def test_documents_listing_api(connection, fixture_vault: Path, settings: Settin
     assert payload["count"] == len(payload["documents"])
     assert payload["count"] > 0
     first = payload["documents"][0]
-    for key in ("document_id", "title", "source_path", "last_modified", "chunk_count"):
+    assert payload["vault_path"] == str(fixture_vault)
+    for key in ("document_id", "title", "source_path", "vault_relative_path", "last_modified", "chunk_count"):
         assert key in first, key
+    assert not first["vault_relative_path"].startswith("/")
     assert all(d["chunk_count"] >= 0 for d in payload["documents"])
 
 
@@ -167,6 +189,7 @@ def test_status_reports_config_diagnostics(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert payload["top_k"] == 5
     assert payload["enable_concept_boost"] is False
+    assert payload["default_llm_provider"] == "invalid-provider"
     diagnostics = payload["config_diagnostics"]
     assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
 
