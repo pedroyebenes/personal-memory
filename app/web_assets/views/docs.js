@@ -1,6 +1,7 @@
 import { h, mount, clear } from "../lib/h.js";
 import { listDocuments, getDocument } from "../lib/api.js";
 import { buildFilters } from "../components/filters.js";
+import { renderMarkdown } from "../lib/markdown.js";
 
 export const docsView = {
   mount(target, { store }) {
@@ -139,15 +140,7 @@ export const docsView = {
                 },
               }, "Use as filter"),
             ]),
-            h("pre", {
-              class: "pm-np-full-text",
-              style: {
-                whiteSpace: "pre-wrap", wordBreak: "break-word",
-                background: "rgba(0,0,0,0.22)", padding: "var(--pm-sp-3) var(--pm-sp-4)",
-                borderRadius: "var(--pm-radius-md)", border: "1px solid var(--pm-border)",
-                maxHeight: "calc(100vh - 220px)", overflow: "auto",
-              },
-            }, doc.raw_text || ""),
+            renderMarkdown(doc.raw_text || ""),
           ]),
         );
       } catch (err) {

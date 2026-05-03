@@ -206,6 +206,82 @@
 }
 .pm-error { color: var(--pm-error); font-style: normal; }
 
+/* ── Markdown document body ───────────────────────── */
+.pm-md {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-md);
+  background: rgba(0,0,0,0.18);
+  padding: var(--pm-sp-5);
+  color: var(--pm-fg);
+  line-height: var(--pm-leading-loose);
+  word-break: break-word;
+}
+.pm-md > * + * { margin-top: var(--pm-sp-3); }
+.pm-md h1,
+.pm-md h2,
+.pm-md h3,
+.pm-md h4,
+.pm-md h5,
+.pm-md h6 {
+  color: var(--pm-fg);
+  line-height: var(--pm-leading-tight);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: normal;
+}
+.pm-md h1 { font-size: var(--pm-text-xl); }
+.pm-md h2 { font-size: var(--pm-text-lg); }
+.pm-md h3,
+.pm-md h4,
+.pm-md h5,
+.pm-md h6 { font-size: var(--pm-text-md); color: var(--pm-fg-muted); }
+.pm-md p { white-space: normal; }
+.pm-md ul,
+.pm-md ol {
+  padding-left: var(--pm-sp-5);
+}
+.pm-md li + li { margin-top: var(--pm-sp-1); }
+.pm-md blockquote {
+  border-left: 3px solid var(--pm-accent-line);
+  padding-left: var(--pm-sp-3);
+  color: var(--pm-fg-muted);
+}
+.pm-md code {
+  font-family: var(--pm-font-mono);
+  font-size: var(--pm-text-sm);
+  background: var(--pm-bg-hover);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-sm);
+  padding: 1px 4px;
+}
+.pm-md pre {
+  white-space: pre-wrap;
+  overflow-x: auto;
+  background: rgba(0,0,0,0.24);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-md);
+  padding: var(--pm-sp-3) var(--pm-sp-4);
+}
+.pm-md pre code {
+  display: block;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.pm-md-frontmatter {
+  color: var(--pm-fg-muted);
+}
+.pm-md hr {
+  border: 0;
+  border-top: 1px solid var(--pm-border);
+}
+.pm-md-wikilink {
+  color: var(--pm-accent);
+  border-bottom: 1px dotted var(--pm-accent-line);
+}
+
 /* ── Composer (chat) ─────────────────────────────── */
 .pm-composer {
   display: grid;
