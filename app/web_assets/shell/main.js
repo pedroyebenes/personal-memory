@@ -4,6 +4,7 @@
 import { createStore } from "../lib/store.js";
 import { applyTheme, loadTheme } from "../lib/theme.js";
 import { buildNav } from "./nav.js";
+import { buildRailToggle } from "./rail-toggle.js";
 import { buildStatusBar } from "./status-bar.js";
 import { createRouter } from "./router.js";
 
@@ -29,8 +30,15 @@ const store = createStore({
 
 const header = document.getElementById("pm-header");
 const mountTarget = document.getElementById("view-mount");
+const appRoot = document.getElementById("app");
 
-header.appendChild(buildNav({ store }));
+const nav = buildNav({ store });
+const railToggle = buildRailToggle(appRoot);
+const firstLink = nav.querySelector(".pm-nav-link");
+if (firstLink) nav.insertBefore(railToggle, firstLink);
+else nav.appendChild(railToggle);
+
+header.appendChild(nav);
 
 const statusBar = buildStatusBar({ store });
 header.appendChild(statusBar.root);

@@ -4,6 +4,10 @@
 .pm-map-canvas { position: absolute; inset: 0; }
 
 /* ── Sidebar (left rail) ─────────────────────────── */
+#app[data-rail-collapsed="true"] .pm-map-sidebar {
+  display: none;
+}
+
 .pm-map-sidebar {
   position: absolute; top: 0; left: 0;
   width: 252px; height: 100%;

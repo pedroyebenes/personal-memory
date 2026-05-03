@@ -22,7 +22,7 @@ export function buildNav({ store }) {
 
   const root = h("nav", { class: "pm-nav", role: "navigation", "aria-label": "Main views" }, [
     h("div", { class: "pm-brand" }, [
-      h("span", { class: "pm-brand-mark", "aria-hidden": "true" }, "✦"),
+      h("span", { class: "pm-brand-mark", "aria-hidden": "true" }, "🧠"),
       h("span", null, "Personal Memory"),
     ]),
     ...links,

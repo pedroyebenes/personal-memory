@@ -25,9 +25,28 @@
   min-width: 0;
 }
 
+/* Collapsed via header toggle (#app[data-rail-collapsed]) */
+#app[data-rail-collapsed="true"] .pm-workbench {
+  grid-template-columns: 1fr;
+}
+#app[data-rail-collapsed="true"] .pm-workbench-rail {
+  display: none !important;
+}
+
 @media (max-width: 880px) {
   .pm-workbench { grid-template-columns: 1fr; }
   .pm-workbench-rail { display: none; }
+
+  /* Rail opened via toggle → slide-in overlay */
+  #app:not([data-rail-collapsed="true"]) .pm-workbench-rail {
+    display: flex !important;
+    position: fixed;
+    inset: var(--pm-nav-h) auto 0 0;
+    width: min(var(--pm-rail-w), 90vw);
+    z-index: 100;
+    box-shadow: var(--pm-shadow-lg);
+    border-right: 1px solid var(--pm-border-strong);
+  }
 }
 
 /* ── Section heading inside the rail ──────────────────── */
@@ -325,3 +344,17 @@
   color: var(--pm-accent);
 }
 .pm-workspace-tab:hover { color: var(--pm-fg); }
+
+/* ── Mobile ──────────────────────────────────────── */
+@media (max-width: 600px) {
+  .pm-workbench-main { padding: var(--pm-sp-3); }
+
+  /* Markdown reader: don't cap height — let the page scroll */
+  .pm-md { max-height: none; }
+
+  /* Filter field pairs: single column */
+  .pm-field-row { grid-template-columns: 1fr; }
+
+  /* Evidence meta wraps more readily */
+  .pm-evidence-meta { gap: var(--pm-sp-1); }
+}
