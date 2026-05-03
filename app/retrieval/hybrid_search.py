@@ -17,9 +17,9 @@ from app.retrieval.snippets import extract_snippet, query_terms
 from app.retrieval.semantic_search import semantic_search
 from app.retrieval.sources import build_markdown_ref, build_source_ref
 
-CONCEPT_BOOST_WEIGHT = 0.06
+CONCEPT_BOOST_WEIGHT = 0.06  # default; overridden per-request by Settings.concept_boost_weight
 EXACT_CONCEPT_BOOST_STEP = 0.08
-EXACT_CONCEPT_BOOST_MAX = 0.15
+EXACT_CONCEPT_BOOST_MAX = 0.15  # default; overridden per-request by Settings.concept_boost_exact_max
 
 
 def _normalize_filters(filters: SearchFilters | None) -> SearchFilters:
@@ -163,6 +163,9 @@ def _apply_exact_concept_boost(
     connection: sqlite3.Connection,
     results: list[RetrievalResult],
     terms: list[str],
+    *,
+    step: float = EXACT_CONCEPT_BOOST_STEP,
+    max_boost: float = EXACT_CONCEPT_BOOST_MAX,
 ) -> None:
     if not results or not terms:
         return
@@ -184,8 +187,8 @@ def _apply_exact_concept_boost(
             explanation["exact_concept_matches"] = []
             result.score_explanation = explanation
             continue
-        raw = len(hit_entities) * EXACT_CONCEPT_BOOST_STEP
-        boost = round(min(raw, EXACT_CONCEPT_BOOST_MAX), 6)
+        raw = len(hit_entities) * step
+        boost = round(min(raw, max_boost), 6)
         result.final_score += boost
         exact_matches = [
             {"id": entity_id, "canonical_name": entity_map[entity_id]} for entity_id in sorted(hit_entities)
@@ -200,6 +203,8 @@ def _apply_concept_boost(
     connection: sqlite3.Connection,
     results: list[RetrievalResult],
     terms: list[str],
+    *,
+    weight: float = CONCEPT_BOOST_WEIGHT,
 ) -> None:
     if not results or not terms:
         return
@@ -216,7 +221,7 @@ def _apply_concept_boost(
         hit_entities = matches.get(result.chunk_id)
         if not hit_entities:
             continue
-        boost = round(min(len(hit_entities) * CONCEPT_BOOST_WEIGHT, 0.18), 6)
+        boost = round(min(len(hit_entities) * weight, 0.18), 6)
         result.final_score += boost
         concept_matches = [
             {"id": entity_id, "canonical_name": by_id[entity_id]["canonical_name"]}
@@ -296,12 +301,16 @@ def hybrid_search(
             explanation.setdefault("concept_matches", [])
             explanation.setdefault("exact_concept_matches", [])
             item.score_explanation = explanation
-        _apply_exact_concept_boost(connection, merged, terms)
-        _apply_concept_boost(connection, merged, terms)
+        _apply_exact_concept_boost(
+            connection, merged, terms,
+            step=EXACT_CONCEPT_BOOST_STEP,
+            max_boost=settings.concept_boost_exact_max,
+        )
+        _apply_concept_boost(connection, merged, terms, weight=settings.concept_boost_weight)
     merged.sort(key=lambda item: item.final_score, reverse=True)
     if should_rerank:
         chunk_texts = {chunk_id: str(item.get("text") or "") for chunk_id, item in metadata.items()}
-        merged = rerank_results(merged, query, chunk_texts)
+        merged = rerank_results(merged, query, chunk_texts, max_boost=settings.rerank_max_boost)
     if debug_scores:
         for item in merged:
             explanation = item.score_explanation or {}

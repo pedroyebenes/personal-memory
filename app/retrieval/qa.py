@@ -45,11 +45,11 @@ def _build_extractive_answer(results) -> str:
     return "Relevant evidence:\n" + "\n".join(evidence_lines)
 
 
-def _evidence_is_sufficient(results) -> bool:
+def _evidence_is_sufficient(results, threshold: float = 0.2) -> bool:
     if not results:
         return False
     top_score = results[0].final_score
-    return top_score >= 0.2 or len(results) >= 2
+    return top_score >= threshold or len(results) >= 2
 
 
 def answer_question(
@@ -88,7 +88,7 @@ def answer_question(
     sources = _build_sources(results)
     should_use_llm = settings.enable_llm_synthesis if use_llm is None else use_llm
     if should_use_llm:
-        if _evidence_is_sufficient(results):
+        if _evidence_is_sufficient(results, threshold=settings.evidence_sufficiency_threshold):
             try:
                 answer = synthesize_answer(query, sources, settings)
                 return {

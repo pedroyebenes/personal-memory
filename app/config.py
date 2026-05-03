@@ -17,6 +17,10 @@ DEFAULT_ENABLE_QUERY_REWRITE = False
 DEFAULT_ENABLE_RERANKING = False
 DEFAULT_ENABLE_CONCEPT_BOOST = False
 DEFAULT_USE_BREADCRUMB_EMBEDDINGS = True
+DEFAULT_CONCEPT_BOOST_WEIGHT = 0.06
+DEFAULT_CONCEPT_BOOST_EXACT_MAX = 0.15
+DEFAULT_RERANK_MAX_BOOST = 0.18
+DEFAULT_EVIDENCE_SUFFICIENCY_THRESHOLD = 0.2
 DEFAULT_SYNTHESIS_MODEL_NAME = "gemma4:e2b"
 DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME = "gpt-5-mini"
 DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME = "gemini-2.5-flash"
@@ -167,6 +171,10 @@ class Settings:
     ingest_exclude: tuple[str, ...] = ()
     use_breadcrumb_embeddings: bool = DEFAULT_USE_BREADCRUMB_EMBEDDINGS
     llm_provider_order: tuple[str, ...] = ()
+    concept_boost_weight: float = DEFAULT_CONCEPT_BOOST_WEIGHT
+    concept_boost_exact_max: float = DEFAULT_CONCEPT_BOOST_EXACT_MAX
+    rerank_max_boost: float = DEFAULT_RERANK_MAX_BOOST
+    evidence_sufficiency_threshold: float = DEFAULT_EVIDENCE_SUFFICIENCY_THRESHOLD
 
     def ordered_llm_providers(self) -> tuple[str, ...]:
         """Supported providers in UI order: config order first, then any omitted providers (canonical order)."""
@@ -378,6 +386,18 @@ def _coerce_path(value: str | None, *, base_dir: Path | None = None, resolve: bo
     return path.resolve() if resolve else path
 
 
+def _parse_positive_float(value: str | float | None, default: float, field_name: str) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number, got {value!r}") from exc
+    if parsed < 0:
+        return default
+    return parsed
+
+
 def _parse_positive_int(value: str | int | None, default: int, field_name: str) -> int:
     if value is None:
         return default
@@ -510,6 +530,10 @@ def load_settings(config_path: str | None = None) -> Settings:
     ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
     ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
     breadcrumb_emb_value = os.getenv("USE_BREADCRUMB_EMBEDDINGS", file_values.get("USE_BREADCRUMB_EMBEDDINGS"))
+    concept_boost_weight_value = os.getenv("CONCEPT_BOOST_WEIGHT", file_values.get("CONCEPT_BOOST_WEIGHT"))
+    concept_boost_exact_max_value = os.getenv("CONCEPT_BOOST_EXACT_MAX", file_values.get("CONCEPT_BOOST_EXACT_MAX"))
+    rerank_max_boost_value = os.getenv("RERANK_MAX_BOOST", file_values.get("RERANK_MAX_BOOST"))
+    evidence_threshold_value = os.getenv("EVIDENCE_SUFFICIENCY_THRESHOLD", file_values.get("EVIDENCE_SUFFICIENCY_THRESHOLD"))
     order_env = os.getenv("LLM_PROVIDER_ORDER")
     order_file = file_values.get("LLM_PROVIDER_ORDER")
     order_value = order_env if order_env is not None else order_file
@@ -551,4 +575,8 @@ def load_settings(config_path: str | None = None) -> Settings:
         ingest_exclude=_parse_pattern_list(ingest_exclude_value),
         use_breadcrumb_embeddings=_parse_bool(breadcrumb_emb_value, DEFAULT_USE_BREADCRUMB_EMBEDDINGS),
         llm_provider_order=_parse_provider_order(order_value),
+        concept_boost_weight=_parse_positive_float(concept_boost_weight_value, DEFAULT_CONCEPT_BOOST_WEIGHT, "CONCEPT_BOOST_WEIGHT"),
+        concept_boost_exact_max=_parse_positive_float(concept_boost_exact_max_value, DEFAULT_CONCEPT_BOOST_EXACT_MAX, "CONCEPT_BOOST_EXACT_MAX"),
+        rerank_max_boost=_parse_positive_float(rerank_max_boost_value, DEFAULT_RERANK_MAX_BOOST, "RERANK_MAX_BOOST"),
+        evidence_sufficiency_threshold=_parse_positive_float(evidence_threshold_value, DEFAULT_EVIDENCE_SUFFICIENCY_THRESHOLD, "EVIDENCE_SUFFICIENCY_THRESHOLD"),
     )
