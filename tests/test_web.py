@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from app.config import Settings
+from app.config import SUPPORTED_LLM_PROVIDERS, Settings
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault
 from app import web
@@ -42,7 +42,7 @@ def test_main_module_wires_router_and_all_views() -> None:
 def test_retrieval_controls_include_mlx_lm_provider() -> None:
     controls = _read_web_asset("components/retrieval-controls.js")
 
-    assert '{ value: "mlx_lm", label: "MLX-LM" }' in controls
+    assert "mlx_lm" in controls and "MLX-LM" in controls and "PROVIDER_LABELS" in controls
 
 
 def test_retrieval_controls_show_llm_options_without_advanced_dropdown() -> None:
@@ -190,8 +190,28 @@ def test_status_reports_config_diagnostics(tmp_path: Path) -> None:
     assert payload["top_k"] == 5
     assert payload["enable_concept_boost"] is False
     assert payload["default_llm_provider"] == "invalid-provider"
+    assert payload["fallback_llm_provider"] == ""
+    assert payload["llm_provider_order"] == list(SUPPORTED_LLM_PROVIDERS)
     diagnostics = payload["config_diagnostics"]
     assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
+
+
+def test_status_reports_custom_llm_provider_order(tmp_path: Path) -> None:
+    settings = Settings(
+        vault_path=tmp_path,
+        database_path=tmp_path / "memory.sqlite3",
+        llm_provider="ollama",
+        llm_provider_order=("gemini", "ollama"),
+    )
+    connection = connect(settings.database_path)
+    init_db(connection)
+    try:
+        status, payload = handle_api_get("/api/status", settings, RefreshState(), lambda callback: callback(connection))
+    finally:
+        connection.close()
+
+    assert int(status) == 200
+    assert payload["llm_provider_order"] == ["gemini", "ollama", "openai", "nvidia", "mlx_lm"]
 
 
 def test_chat_rejects_invalid_provider(connection, fixture_vault: Path, settings: Settings) -> None:

@@ -22,6 +22,8 @@ def settings(tmp_path: Path) -> Settings:
         top_k=5,
         enable_llm_synthesis=False,
         synthesis_model_name=None,
+        llm_provider="ollama",
+        fallback_llm_provider="ollama",
     )
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import Settings, format_diagnostics, load_settings
+from app.config import SUPPORTED_LLM_PROVIDERS, Settings, format_diagnostics, load_settings
 
 
 def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
@@ -14,7 +14,8 @@ def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
           "DATABASE_PATH": "./data/cache/test.sqlite3",
           "TOP_K": 9,
           "ENABLE_QUERY_REWRITE": true,
-          "ENABLE_CONCEPT_BOOST": true
+          "ENABLE_CONCEPT_BOOST": true,
+          "FALLBACK_LLM_PROVIDER": "ollama"
         }
         """.strip(),
         encoding="utf-8",
@@ -27,6 +28,8 @@ def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
     assert settings.top_k == 9
     assert settings.enable_query_rewrite is True
     assert settings.enable_concept_boost is True
+    assert settings.fallback_llm_provider == "ollama"
+    assert settings.llm_provider == "ollama"
 
 
 def test_environment_variables_override_json_config(
@@ -37,7 +40,7 @@ def test_environment_variables_override_json_config(
         """
         {
           "TOP_K": 3,
-          "LLM_PROVIDER": "gemini"
+          "DEFAULT_LLM_PROVIDER": "gemini"
         }
         """.strip(),
         encoding="utf-8",
@@ -58,6 +61,44 @@ def test_load_settings_reads_default_llm_provider_alias(tmp_path: Path) -> None:
     settings = load_settings(str(config_path))
 
     assert settings.llm_provider == "gemini"
+    assert settings.fallback_llm_provider == ""
+
+
+def test_load_settings_fallback_used_when_no_primary_default(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"FALLBACK_LLM_PROVIDER": "gemini"}', encoding="utf-8")
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider == "gemini"
+    assert settings.fallback_llm_provider == "gemini"
+
+
+def test_load_settings_primary_default_over_fallback(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"DEFAULT_LLM_PROVIDER": "gemini", "FALLBACK_LLM_PROVIDER": "ollama"}',
+        encoding="utf-8",
+    )
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider == "gemini"
+    assert settings.fallback_llm_provider == "ollama"
+
+
+def test_load_settings_json_does_not_read_legacy_llm_provider_key(tmp_path: Path) -> None:
+    """config.json must use DEFAULT_LLM_PROVIDER / FALLBACK_LLM_PROVIDER; legacy LLM_PROVIDER is ignored."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"LLM_PROVIDER": "gemini", "FALLBACK_LLM_PROVIDER": "openai"}',
+        encoding="utf-8",
+    )
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider == "openai"
+    assert settings.fallback_llm_provider == "openai"
 
 
 def test_load_settings_reads_reranking_flag(tmp_path: Path, monkeypatch) -> None:
@@ -75,7 +116,7 @@ def test_load_settings_reads_nvidia_config(tmp_path: Path) -> None:
     config_path.write_text(
         """
         {
-          "LLM_PROVIDER": "nvidia",
+          "DEFAULT_LLM_PROVIDER": "nvidia",
           "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
           "NVIDIA_API_KEY": "nvapi-test",
           "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1"
@@ -97,7 +138,7 @@ def test_load_settings_reads_mlx_lm_config_and_normalizes_provider(tmp_path: Pat
     config_path.write_text(
         """
         {
-          "LLM_PROVIDER": "mlx-lm",
+          "DEFAULT_LLM_PROVIDER": "mlx-lm",
           "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
           "MLX_LM_BASE_URL": "http://localhost:8080/v1"
         }
@@ -117,7 +158,7 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
     config_path.write_text(
         """
         {
-          "LLM_PROVIDER": "ollama",
+          "DEFAULT_LLM_PROVIDER": "ollama",
           "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
           "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
           "NVIDIA_SYNTHESIS_MODEL_NAME": "z-ai/glm-4.7",
@@ -137,8 +178,39 @@ def test_load_settings_uses_provider_specific_model_defaults(tmp_path: Path) -> 
     assert settings.get_synthesis_model_name("mlx-lm") == "mlx-community/Qwen3-4B-4bit"
 
 
+def test_ordered_llm_providers_uses_supported_order_when_unconfigured() -> None:
+    settings = Settings()
+    assert settings.ordered_llm_providers() == SUPPORTED_LLM_PROVIDERS
+
+
+def test_ordered_llm_providers_partial_list_appends_remaining_in_canonical_order() -> None:
+    settings = Settings(llm_provider_order=("nvidia", "gemini"))
+    ordered = settings.ordered_llm_providers()
+    assert ordered[:2] == ("nvidia", "gemini")
+    assert set(ordered) == set(SUPPORTED_LLM_PROVIDERS)
+
+
+def test_load_settings_reads_llm_provider_order_json_array(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"LLM_PROVIDER_ORDER": ["openai", "ollama"]}', encoding="utf-8")
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider_order == ("openai", "ollama")
+
+
+def test_load_settings_reads_llm_provider_order_comma_string(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"LLM_PROVIDER_ORDER": "gemini, mlx_lm , invalid"}', encoding="utf-8")
+
+    settings = load_settings(str(config_path))
+
+    assert settings.llm_provider_order == ("gemini", "mlx_lm")
+
+
 def test_provider_availability_marks_missing_keys() -> None:
     settings = Settings(
+        llm_provider="ollama",
         openai_api_key=None,
         gemini_api_key=None,
         nvidia_api_key=None,

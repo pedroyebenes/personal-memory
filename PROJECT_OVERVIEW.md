@@ -55,7 +55,7 @@ Supported settings:
 - `TOP_K`
 - `ENABLE_LLM_SYNTHESIS`
 - `ENABLE_QUERY_REWRITE`
-- `LLM_PROVIDER`
+- `DEFAULT_LLM_PROVIDER` and `FALLBACK_LLM_PROVIDER` (used when the primary default is unset)
 - `SYNTHESIS_MODEL_NAME` as a global override
 - provider-specific defaults such as `OPENAI_SYNTHESIS_MODEL_NAME`, `GEMINI_SYNTHESIS_MODEL_NAME`, `NVIDIA_SYNTHESIS_MODEL_NAME`, and `OLLAMA_SYNTHESIS_MODEL_NAME`
 - provider credentials and base URLs

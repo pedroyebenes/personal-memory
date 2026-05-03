@@ -17,7 +17,6 @@ DEFAULT_ENABLE_QUERY_REWRITE = False
 DEFAULT_ENABLE_RERANKING = False
 DEFAULT_ENABLE_CONCEPT_BOOST = False
 DEFAULT_USE_BREADCRUMB_EMBEDDINGS = True
-DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_SYNTHESIS_MODEL_NAME = "gemma4:e2b"
 DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME = "gpt-5-mini"
 DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME = "gemini-2.5-flash"
@@ -35,6 +34,25 @@ def normalize_provider_name(provider: str | None) -> str:
     return (provider or "").strip().lower().replace("-", "_")
 
 
+def _parse_provider_order(value: Any) -> tuple[str, ...]:
+    """Parse LLM_PROVIDER_ORDER from JSON (array), comma-separated string, or env."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        items = [normalize_provider_name(part) for part in value.split(",") if part.strip()]
+    elif isinstance(value, list):
+        items = [normalize_provider_name(str(item)) for item in value]
+    else:
+        return ()
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for name in items:
+        if name in SUPPORTED_LLM_PROVIDERS and name not in seen:
+            ordered.append(name)
+            seen.add(name)
+    return tuple(ordered)
+
+
 @dataclass(slots=True)
 class Settings:
     vault_path: Path | None = None
@@ -45,7 +63,8 @@ class Settings:
     enable_query_rewrite: bool = DEFAULT_ENABLE_QUERY_REWRITE
     enable_reranking: bool = DEFAULT_ENABLE_RERANKING
     enable_concept_boost: bool = DEFAULT_ENABLE_CONCEPT_BOOST
-    llm_provider: str = DEFAULT_LLM_PROVIDER
+    llm_provider: str = ""
+    fallback_llm_provider: str = ""
     synthesis_model_name: str | None = None
     openai_synthesis_model_name: str = DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME
     gemini_synthesis_model_name: str = DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME
@@ -63,6 +82,24 @@ class Settings:
     ingest_include: tuple[str, ...] = ()
     ingest_exclude: tuple[str, ...] = ()
     use_breadcrumb_embeddings: bool = DEFAULT_USE_BREADCRUMB_EMBEDDINGS
+    llm_provider_order: tuple[str, ...] = ()
+
+    def ordered_llm_providers(self) -> tuple[str, ...]:
+        """Supported providers in UI order: config order first, then any omitted providers (canonical order)."""
+        custom = list(self.llm_provider_order)
+        if not custom:
+            return SUPPORTED_LLM_PROVIDERS
+        seen: set[str] = set()
+        out: list[str] = []
+        for name in custom:
+            if name in SUPPORTED_LLM_PROVIDERS and name not in seen:
+                out.append(name)
+                seen.add(name)
+        for name in SUPPORTED_LLM_PROVIDERS:
+            if name not in seen:
+                out.append(name)
+                seen.add(name)
+        return tuple(out)
 
     def is_supported_provider(self, provider: str | None = None) -> bool:
         provider_name = normalize_provider_name(provider or self.llm_provider)
@@ -300,7 +337,15 @@ def load_settings(config_path: str | None = None) -> Settings:
     if provider_value is None:
         provider_value = os.getenv("DEFAULT_LLM_PROVIDER")
     if provider_value is None:
-        provider_value = file_values.get("DEFAULT_LLM_PROVIDER", file_values.get("LLM_PROVIDER"))
+        provider_value = file_values.get("DEFAULT_LLM_PROVIDER")
+
+    fallback_provider_value = os.getenv("FALLBACK_LLM_PROVIDER")
+    if fallback_provider_value is None:
+        fallback_provider_value = file_values.get("FALLBACK_LLM_PROVIDER")
+
+    primary_llm = normalize_provider_name(str(provider_value)) if provider_value not in (None, "") else ""
+    fallback_llm = normalize_provider_name(str(fallback_provider_value)) if fallback_provider_value not in (None, "") else ""
+    effective_llm = primary_llm or fallback_llm
     synthesis_value = os.getenv("SYNTHESIS_MODEL_NAME", file_values.get("SYNTHESIS_MODEL_NAME"))
     openai_synthesis_value = os.getenv("OPENAI_SYNTHESIS_MODEL_NAME", file_values.get("OPENAI_SYNTHESIS_MODEL_NAME"))
     gemini_synthesis_value = os.getenv("GEMINI_SYNTHESIS_MODEL_NAME", file_values.get("GEMINI_SYNTHESIS_MODEL_NAME"))
@@ -318,6 +363,9 @@ def load_settings(config_path: str | None = None) -> Settings:
     ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
     ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
     breadcrumb_emb_value = os.getenv("USE_BREADCRUMB_EMBEDDINGS", file_values.get("USE_BREADCRUMB_EMBEDDINGS"))
+    order_env = os.getenv("LLM_PROVIDER_ORDER")
+    order_file = file_values.get("LLM_PROVIDER_ORDER")
+    order_value = order_env if order_env is not None else order_file
 
     vault_path = _coerce_path(os.getenv("VAULT_PATH"), resolve=True)
     if vault_path is None:
@@ -336,7 +384,8 @@ def load_settings(config_path: str | None = None) -> Settings:
         enable_query_rewrite=_parse_bool(rewrite_value, DEFAULT_ENABLE_QUERY_REWRITE),
         enable_reranking=_parse_bool(reranking_value, DEFAULT_ENABLE_RERANKING),
         enable_concept_boost=_parse_bool(concept_boost_value, DEFAULT_ENABLE_CONCEPT_BOOST),
-        llm_provider=normalize_provider_name(provider_value or DEFAULT_LLM_PROVIDER),
+        llm_provider=effective_llm,
+        fallback_llm_provider=fallback_llm,
         synthesis_model_name=synthesis_value,
         openai_synthesis_model_name=openai_synthesis_value or DEFAULT_OPENAI_SYNTHESIS_MODEL_NAME,
         gemini_synthesis_model_name=gemini_synthesis_value or DEFAULT_GEMINI_SYNTHESIS_MODEL_NAME,
@@ -354,4 +403,5 @@ def load_settings(config_path: str | None = None) -> Settings:
         ingest_include=_parse_pattern_list(ingest_include_value),
         ingest_exclude=_parse_pattern_list(ingest_exclude_value),
         use_breadcrumb_embeddings=_parse_bool(breadcrumb_emb_value, DEFAULT_USE_BREADCRUMB_EMBEDDINGS),
+        llm_provider_order=_parse_provider_order(order_value),
     )

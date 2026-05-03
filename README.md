@@ -49,7 +49,8 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "ENABLE_RERANKING": false,
   "ENABLE_CONCEPT_BOOST": false,
   "DEFAULT_LLM_PROVIDER": "ollama",
-  "LLM_PROVIDER": "ollama",
+  "FALLBACK_LLM_PROVIDER": "ollama",
+  "LLM_PROVIDER_ORDER": ["ollama", "openai", "gemini", "nvidia", "mlx_lm"],
   "SYNTHESIS_MODEL_NAME": null,
   "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
   "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
@@ -69,6 +70,10 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
 
 By default the repo expects your notes at `./data/vault` and stores SQLite data at `./data/cache/memory.sqlite3`.
 
+**Defaults:** `DEFAULT_LLM_PROVIDER` is the primary backend used when nothing else selects a provider (CLI defaults, web UI initial state, chat requests without an explicit `provider`). If it is omitted, `FALLBACK_LLM_PROVIDER` is used. If both are omitted and no environment override is set, no default LLM is configured until you add one of these keys or set `LLM_PROVIDER` / `DEFAULT_LLM_PROVIDER` / `FALLBACK_LLM_PROVIDER` in the environment.
+
+**Web UI provider order:** Optional `LLM_PROVIDER_ORDER` controls the order of entries in the LLM provider dropdown (JSON array of provider ids, or a comma-separated string). Any supported providers you omit are appended in the canonical order.
+
 Path resolution depends on how you run the app:
 
 - When running directly on the host, relative paths in `config.json` are resolved relative to the `config.json` file on the host.
@@ -84,7 +89,8 @@ You can still override any value with environment variables when needed:
 - `ENABLE_LLM_SYNTHESIS`
 - `ENABLE_QUERY_REWRITE`
 - `ENABLE_RERANKING`
-- `LLM_PROVIDER`
+- `DEFAULT_LLM_PROVIDER` / `FALLBACK_LLM_PROVIDER` (use `LLM_PROVIDER`, `DEFAULT_LLM_PROVIDER`, or `FALLBACK_LLM_PROVIDER` as env overrides)
+- `LLM_PROVIDER_ORDER` (JSON array or comma-separated string; env `LLM_PROVIDER_ORDER` overrides the file)
 - `SYNTHESIS_MODEL_NAME`
 - `OPENAI_SYNTHESIS_MODEL_NAME`
 - `GEMINI_SYNTHESIS_MODEL_NAME`
@@ -344,6 +350,79 @@ Run it with:
 ```bash
 personal-memory web --host 0.0.0.0 --port 8100
 ```
+
+Use `--config /path/to/config.json` if your configuration file is not the default `./config.json` (paths inside that file resolve relative to the config file’s directory).
+
+### Running as a permanent server (macOS)
+
+For a native install (virtualenv or `pip install -e .`), the usual approach is a **LaunchAgent**: macOS starts the web server at login and restarts it if it exits. Use **absolute paths** everywhere so behavior does not depend on Terminal’s working directory.
+
+1. **Install the CLI** into a venv and confirm it runs manually:
+
+   ```bash
+   cd /absolute/path/to/personal-memory
+   source .venv/bin/activate
+   personal-memory web --host 0.0.0.0 --port 8100
+   ```
+
+2. **Create a log directory** (optional but recommended):
+
+   ```bash
+   mkdir -p /absolute/path/to/personal-memory/logs
+   ```
+
+3. **Create** `~/Library/LaunchAgents/com.yourname.personal-memory.web.plist` (replace `yourname`, paths, and port as needed):
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+   <dict>
+     <key>Label</key>
+     <string>com.yourname.personal-memory.web</string>
+     <key>WorkingDirectory</key>
+     <string>/absolute/path/to/personal-memory</string>
+     <key>ProgramArguments</key>
+     <array>
+       <string>/absolute/path/to/personal-memory/.venv/bin/personal-memory</string>
+       <string>--config</string>
+       <string>/absolute/path/to/personal-memory/config.json</string>
+       <string>web</string>
+       <string>--host</string>
+       <string>0.0.0.0</string>
+       <string>--port</string>
+       <string>8100</string>
+     </array>
+     <key>RunAtLoad</key>
+     <true/>
+     <key>KeepAlive</key>
+     <true/>
+     <key>StandardOutPath</key>
+     <string>/absolute/path/to/personal-memory/logs/web.stdout.log</string>
+     <key>StandardErrorPath</key>
+     <string>/absolute/path/to/personal-memory/logs/web.stderr.log</string>
+   </dict>
+   </plist>
+   ```
+
+   Omit the `--config` and its path if you rely on the default `config.json` next to the repo.
+
+4. **Load and start** the agent:
+
+   ```bash
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.yourname.personal-memory.web.plist
+   ```
+
+   To stop and unload:
+
+   ```bash
+   launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.yourname.personal-memory.web.plist
+   ```
+
+5. **Firewall:** The first time Python accepts inbound connections on your LAN, macOS may ask to allow it. For Wi‑Fi access from other devices, bind `--host 0.0.0.0` as above and ensure the Mac’s firewall allows the Python or `personal-memory` binary.
+
+**Alternatives:** Running under **Docker Compose** with `docker compose up -d` (see above) gives a long-lived server without LaunchAgents; use whichever matches how you deploy the app.
 
 The chat page now includes:
 

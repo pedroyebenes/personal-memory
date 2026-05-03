@@ -88,7 +88,7 @@ def test_status_command_includes_config_diagnostics(tmp_path: Path, monkeypatch,
             {
                 "VAULT_PATH": str(tmp_path / "missing-vault"),
                 "DATABASE_PATH": str(tmp_path / "memory.sqlite3"),
-                "LLM_PROVIDER": "invalid-provider",
+                "DEFAULT_LLM_PROVIDER": "invalid-provider",
             }
         ),
         encoding="utf-8",

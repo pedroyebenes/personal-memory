@@ -7,7 +7,7 @@
   "ENABLE_QUERY_REWRITE": false,
   "ENABLE_RERANKING": false,
   "ENABLE_CONCEPT_BOOST": false,
-  "DEFAULT_LLM_PROVIDER": "ollama",
+  "DEFAULT_LLM_PROVIDER": "nvidia",
   "LLM_PROVIDER": "ollama",
   "SYNTHESIS_MODEL_NAME": null,
   "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",

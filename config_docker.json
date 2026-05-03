@@ -8,7 +8,7 @@
     "ENABLE_RERANKING": false,
     "ENABLE_CONCEPT_BOOST": false,
     "DEFAULT_LLM_PROVIDER": "ollama",
-    "LLM_PROVIDER": "ollama",
+    "FALLBACK_LLM_PROVIDER": "ollama",
     "SYNTHESIS_MODEL_NAME": null,
     "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
     "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",

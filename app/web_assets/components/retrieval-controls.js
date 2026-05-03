@@ -1,16 +1,42 @@
 // Retrieval controls: top-K, rerank, concept boost, LLM provider/model, query rewrite.
 // Reads/writes `store.retrieval`. The chat view also reads `store.retrieval.useLlm`
 // and the search view ignores it (search only retrieves).
+// Provider dropdown order follows `store.providerOrder` from /api/status (`LLM_PROVIDER_ORDER` in config).
 
-import { h } from "../lib/h.js";
+import { h, clear } from "../lib/h.js";
 
-const PROVIDERS = [
-  { value: "ollama", label: "Ollama" },
-  { value: "gemini", label: "Gemini" },
-  { value: "nvidia", label: "NVIDIA" },
-  { value: "openai", label: "OpenAI" },
-  { value: "mlx_lm", label: "MLX-LM" },
-];
+const PROVIDER_LABELS = {
+  ollama: "Ollama",
+  openai: "OpenAI",
+  gemini: "Gemini",
+  nvidia: "NVIDIA",
+  mlx_lm: "MLX-LM",
+};
+
+/** Matches app.config.SUPPORTED_LLM_PROVIDERS when status has not loaded yet. */
+const DEFAULT_PROVIDER_ORDER = ["ollama", "openai", "gemini", "nvidia", "mlx_lm"];
+
+function effectiveProviderOrder(store) {
+  const o = store.get("providerOrder");
+  return Array.isArray(o) && o.length ? o : DEFAULT_PROVIDER_ORDER;
+}
+
+function refillProviderOptions(selectEl, store) {
+  const order = effectiveProviderOrder(store);
+  const prev = selectEl.value;
+  clear(selectEl);
+  for (const value of order) {
+    if (!PROVIDER_LABELS[value]) continue;
+    selectEl.appendChild(h("option", { value }, PROVIDER_LABELS[value]));
+  }
+  const allowed = new Set(order.filter((v) => PROVIDER_LABELS[v]));
+  if (allowed.has(prev)) {
+    selectEl.value = prev;
+  } else {
+    const first = order.find((v) => PROVIDER_LABELS[v]);
+    if (first) selectEl.value = first;
+  }
+}
 
 export function buildRetrievalControls({ store }) {
   const topK = h("input", { type: "number", min: "1", step: "1", value: "5" });
@@ -18,9 +44,8 @@ export function buildRetrievalControls({ store }) {
   const conceptBoost = h("input", { type: "checkbox" });
   const useLlm = h("input", { type: "checkbox" });
   const rewrite = h("input", { type: "checkbox" });
-  const provider = h("select", { "aria-label": "LLM provider" },
-    PROVIDERS.map((p) => h("option", { value: p.value }, p.label)),
-  );
+  const provider = h("select", { "aria-label": "LLM provider" });
+  refillProviderOptions(provider, store);
   const model = h("input", { type: "text", placeholder: "Model name" });
   const providerStatus = h("div", { class: "pm-empty", style: { fontSize: "var(--pm-text-xs)" } }, "");
 
@@ -76,7 +101,11 @@ export function buildRetrievalControls({ store }) {
   ]);
 
   syncFromStore();
-  const off = store.on("retrieval", syncFromStore);
+  const offRetrieval = store.on("retrieval", syncFromStore);
+  const offOrder = store.on("providerOrder", () => {
+    refillProviderOptions(provider, store);
+    syncFromStore();
+  });
 
   return {
     root,
@@ -84,6 +113,6 @@ export function buildRetrievalControls({ store }) {
       providerStatus.textContent = text || "";
       providerStatus.classList.toggle("pm-error", kind === "error");
     },
-    destroy() { off(); },
+    destroy() { offRetrieval(); offOrder(); },
   };
 }

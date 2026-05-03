@@ -1067,8 +1067,10 @@ def handle_api_get(
         summary["refresh_state"] = refresh_state.snapshot()
         summary["llm_provider"] = settings.llm_provider
         summary["default_llm_provider"] = settings.llm_provider
+        summary["fallback_llm_provider"] = settings.fallback_llm_provider
         summary["provider_defaults"] = settings.synthesis_model_defaults()
         summary["provider_availability"] = settings.provider_availability()
+        summary["llm_provider_order"] = list(settings.ordered_llm_providers())
         summary["enable_reranking"] = settings.enable_reranking
         summary["enable_concept_boost"] = settings.enable_concept_boost
         summary["top_k"] = settings.top_k
