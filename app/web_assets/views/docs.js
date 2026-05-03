@@ -2,6 +2,10 @@ import { h, mount, clear } from "../lib/h.js";
 import { listDocuments, getDocument } from "../lib/api.js";
 import { buildFilters } from "../components/filters.js";
 import { renderMarkdown } from "../lib/markdown.js";
+import { buildRsvpReader } from "./rsvp.js";
+
+let rsvpMode = false;
+let activeRsvpDestroy = null;
 
 export const docsView = {
   mount(target, { store }) {
@@ -114,6 +118,8 @@ export const docsView = {
       selectedPath = d.source_path;
       store.set({ selectedDocumentPath: d.source_path, selectedDocumentId: d.document_id });
       renderTree();
+      activeRsvpDestroy?.();
+      activeRsvpDestroy = null;
       mount(reader,
         h("div", { class: "pm-section" }, [
           h("div", { class: "pm-section-title" }, "Loading document…"),
@@ -123,6 +129,29 @@ export const docsView = {
         const doc = await getDocument(d.document_id);
         const obsidianHref = `obsidian://open?path=${encodeURIComponent(d.source_path)}`;
         const displayPath = doc.vault_relative_path || d.vault_relative_path || d.source_path;
+
+        const readBtn = h("button", { type: "button", class: rsvpMode ? "pm-chip pm-chip-muted" : "pm-chip",
+          onclick: () => { rsvpMode = false; openDoc(d); },
+        }, "Read");
+        const rsvpBtn = h("button", { type: "button", class: rsvpMode ? "pm-chip" : "pm-chip pm-chip-muted",
+          onclick: () => { rsvpMode = true; openDoc(d); },
+        }, "RSVP");
+
+        let contentEl;
+        if (rsvpMode) {
+          const docList = applyDocFilters(documents);
+          const docIdx = docList.findIndex(x => x.document_id === d.document_id);
+          const built = buildRsvpReader(doc.raw_text, d.document_id, {
+            onClose: () => { rsvpMode = false; openDoc(d); },
+            onPrev: docIdx > 0 ? () => openDoc(docList[docIdx - 1]) : null,
+            onNext: docIdx < docList.length - 1 ? () => openDoc(docList[docIdx + 1]) : null,
+          });
+          activeRsvpDestroy = built.destroy;
+          contentEl = built.el;
+        } else {
+          contentEl = renderMarkdown(doc.raw_text || "");
+        }
+
         mount(reader,
           h("section", { class: "pm-section" }, [
             h("div", { class: "pm-section-title" }, "Document"),
@@ -139,8 +168,10 @@ export const docsView = {
                   location.hash = "#/chat";
                 },
               }, "Use as filter"),
+              readBtn,
+              rsvpBtn,
             ]),
-            renderMarkdown(doc.raw_text || ""),
+            contentEl,
           ]),
         );
       } catch (err) {
@@ -172,6 +203,8 @@ export const docsView = {
     });
 
     this._cleanup = () => {
+      activeRsvpDestroy?.();
+      activeRsvpDestroy = null;
       offFilters();
       offSel();
       filters.destroy?.();

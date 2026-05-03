@@ -1,0 +1,34 @@
+export function stripMarkdown(text) {
+  if (!text) return "";
+  text = text.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
+  text = text.replace(/<!--[\s\S]*?-->/g, "");
+  text = text.replace(/```[\s\S]*?```/g, "");
+  text = text.replace(/~~~[\s\S]*?~~~/g, "");
+  text = text.replace(/`[^`\n]+`/g, "");
+  text = text.replace(/^#{1,6}\s+(.*)/gm, "$1");
+  text = text.replace(/!\[\[.*?\]\]/g, "");
+  text = text.replace(/!\[.*?\]\(.*?\)/g, "");
+  text = text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2");
+  text = text.replace(/\[\[([^\]]+)\]\]/g, "$1");
+  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  text = text.replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1");
+  text = text.replace(/\*{3}(.+?)\*{3}/gs, "$1");
+  text = text.replace(/_{3}(.+?)_{3}/gs, "$1");
+  text = text.replace(/\*{2}(.+?)\*{2}/gs, "$1");
+  text = text.replace(/_{2}(.+?)_{2}/gs, "$1");
+  text = text.replace(/\*(.+?)\*/g, "$1");
+  text = text.replace(/_(.+?)_/g, "$1");
+  text = text.replace(/~~(.+?)~~/g, "$1");
+  text = text.replace(/^>\s*/gm, "");
+  text = text.replace(/^[-*_]{3,}\s*$/gm, "");
+  text = text.replace(/^\s*[-*+]\s+\[[ xX]\]\s*/gm, "");
+  text = text.replace(/^\s*[-*+]\s+/gm, "");
+  text = text.replace(/^\s*\d+[.)]\s+/gm, "");
+  text = text.replace(/^\[\^[^\]]+\]:[ \t].*(\n[ \t]+.*)*/gm, "");
+  text = text.replace(/\[\^[^\]]+\]/g, "");
+  text = text.replace(/(?<!\w)#[\w/-]+/g, "");
+  text = text.replace(/<[^>]+>/g, "");
+  text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text.trim();
+}
