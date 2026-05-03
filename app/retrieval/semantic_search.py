@@ -160,6 +160,18 @@ def _semantic_search_ann(
     return scored[:top_k]
 
 
+def semantic_search_mode(connection: sqlite3.Connection) -> str:
+    """Return 'ann' when sqlite-vec ANN is available and populated, 'scan' otherwise."""
+    if not sqlite_vec_available(connection):
+        return "scan"
+    if not table_exists(connection, "chunk_vectors"):
+        return "scan"
+    count_row = connection.execute("SELECT COUNT(*) AS n FROM chunk_vectors").fetchone()
+    if not count_row or int(count_row["n"]) == 0:
+        return "scan"
+    return "ann"
+
+
 def semantic_search(connection: sqlite3.Connection, query: str, settings: Settings, top_k: int = 5) -> list[RetrievalResult]:
     query_vector = embed_texts([query], settings.embedding_model_name)[0]
     ann = _semantic_search_ann(connection, query, query_vector, settings, top_k)

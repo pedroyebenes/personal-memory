@@ -36,6 +36,11 @@ def _fallback_embedding(text: str, dimensions: int = 32) -> list[float]:
     return values
 
 
+def embedding_mode(model_name: str) -> str:
+    """Return 'sentence-transformers' when the real model is loaded, 'fallback' otherwise."""
+    return "fallback" if _load_model(model_name) is None else "sentence-transformers"
+
+
 def embed_texts(texts: list[str], model_name: str) -> list[list[float]]:
     model = _load_model(model_name)
     if model is None:

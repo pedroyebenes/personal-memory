@@ -21,6 +21,7 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
 from app.processing.concepts import classify_entity_type, normalize_key
+from app.processing.embeddings import embedding_mode
 from app.retrieval.concept_search import (
     CONCEPT_QUALITIES,
     get_concept_detail,
@@ -30,6 +31,7 @@ from app.retrieval.concept_search import (
 from app.retrieval.evaluation import evaluate_retrieval_cases
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
+from app.retrieval.semantic_search import semantic_search_mode
 from app.util.timestamps import utc_now_iso
 
 WEB_ASSETS_ROOT = Path(__file__).with_name("web_assets").resolve()
@@ -1114,7 +1116,10 @@ def handle_api_get(
 ) -> tuple[HTTPStatus, dict[str, object]]:
     parsed = urlparse(path)
     if parsed.path == "/api/status":
-        summary = with_connection(lambda conn: status_summary(conn))
+        summary = with_connection(lambda conn: {
+            **status_summary(conn),
+            "search_mode": semantic_search_mode(conn),
+        })
         summary["vault_path"] = str(settings.vault_path) if settings.vault_path else None
         summary["refresh_available"] = settings.vault_path is not None
         summary["refresh_state"] = refresh_state.snapshot()
@@ -1129,6 +1134,7 @@ def handle_api_get(
         summary["enable_concept_boost"] = settings.enable_concept_boost
         summary["top_k"] = settings.top_k
         summary["config_diagnostics"] = settings.validate()
+        summary["embedding_mode"] = embedding_mode(settings.embedding_model_name)
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/viz":
         if viz_cache is not None:

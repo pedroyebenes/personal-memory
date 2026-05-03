@@ -56,6 +56,11 @@ export function buildStatusBar({ store }) {
       items.push(h("span", { class: "pm-status-item" }, [h("strong", null, `${(cov * 100).toFixed(0)}%`), " embedded"]));
     }
     mount(stats, ...items);
+    const degraded = [];
+    if (payload.embedding_mode === "fallback") degraded.push("embeddings degraded (hash fallback)");
+    if (payload.search_mode === "scan") degraded.push("search degraded (full scan, install sqlite-vec for ANN)");
+    renderWarning(degraded.length ? `⚠ ${degraded.join("; ")}` : null);
+
     if (store) {
       const provider = payload.default_llm_provider || payload.llm_provider || "ollama";
       const patch = {
@@ -107,9 +112,9 @@ export function buildStatusBar({ store }) {
         setRefreshing(false);
         if (rs?.last_result?.warnings?.length) {
           renderWarning(rs.last_result.warnings[0]);
-        } else {
-          renderWarning(null);
         }
+        // Re-render status to restore degradation warnings after refresh.
+        renderStatus(status);
       }
     } catch (err) {
       renderWarning(`Status: ${err.message}`);
