@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 import threading
@@ -12,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+LOGGER = logging.getLogger(__name__)
 
 from app.config import Settings, normalize_provider_name, supported_llm_providers_list
 from app.db import connect, init_db
@@ -128,6 +131,55 @@ class RefreshState:
                 "last_completed_at": self._last_completed_at,
                 "last_result": self._last_result,
             }
+
+
+class VizCache:
+    """Thread-safe cache for viz computation with background refresh support."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._data: dict[str, object] | None = None
+        self._stale = True
+        self._computing = False
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._stale = True
+
+    def get(self) -> tuple[dict[str, object] | None, bool]:
+        """Return (cached_data, is_stale). data is None if never computed."""
+        with self._lock:
+            return self._data, self._stale
+
+    def store(self, data: dict[str, object]) -> None:
+        with self._lock:
+            self._data = data
+            self._stale = False
+            self._computing = False
+
+    def _recompute(self, db_path: str) -> None:
+        try:
+            conn = connect(db_path)
+            try:
+                init_db(conn)
+                data = _compute_viz_data(conn)
+            finally:
+                conn.close()
+            self.store(data)
+            LOGGER.info("Background viz computation complete.")
+        except Exception as exc:
+            LOGGER.warning("Background viz computation failed: %s", exc)
+            with self._lock:
+                self._computing = False
+
+    def trigger_if_needed(self, db_path: str) -> None:
+        """Spawn a background thread to recompute if the cache is stale and idle."""
+        with self._lock:
+            if not self._stale or self._computing:
+                return
+            self._computing = True
+        t = threading.Thread(target=self._recompute, args=(db_path,), daemon=True)
+        t.start()
 
 
 def _truncate(text: str, limit: int = 220) -> str:
@@ -1058,6 +1110,7 @@ def handle_api_get(
     settings: Settings,
     refresh_state: RefreshState,
     with_connection,
+    viz_cache: VizCache | None = None,
 ) -> tuple[HTTPStatus, dict[str, object]]:
     parsed = urlparse(path)
     if parsed.path == "/api/status":
@@ -1078,6 +1131,19 @@ def handle_api_get(
         summary["config_diagnostics"] = settings.validate()
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/viz":
+        if viz_cache is not None:
+            cached, is_stale = viz_cache.get()
+            if cached is not None:
+                viz_cache.trigger_if_needed(settings.database_path)
+                response = _success_payload(dict(cached))
+                if is_stale:
+                    response["stale"] = True
+                return HTTPStatus.OK, response
+            # No cached data yet — compute synchronously on first request, then cache.
+            data = with_connection(lambda conn: _compute_viz_data(conn))
+            viz_cache.store(data)
+            return HTTPStatus.OK, _success_payload(data)
+        # No cache provided (e.g. in tests) — compute synchronously.
         data = with_connection(lambda conn: _compute_viz_data(conn))
         return HTTPStatus.OK, _success_payload(data)
     if parsed.path == "/api/concepts":
@@ -1350,6 +1416,7 @@ def handle_api_post(
     settings: Settings,
     refresh_state: RefreshState,
     with_connection,
+    viz_cache: VizCache | None = None,
 ) -> tuple[HTTPStatus, dict[str, object]]:
     parsed = urlparse(path)
     if parsed.path == "/api/refresh":
@@ -1376,6 +1443,8 @@ def handle_api_post(
                 details={"refresh_state": refresh_state.snapshot()},
             ) from exc
         refresh_state.finish(dict(summary))
+        if viz_cache is not None:
+            viz_cache.invalidate()
         return HTTPStatus.OK, _success_payload(summary)
     if parsed.path == "/api/concepts/refresh":
         result = with_connection(lambda conn: refresh_concepts(conn, settings))
@@ -1451,8 +1520,13 @@ def handle_api_post(
     return HTTPStatus.OK, _success_payload(response)
 
 
-def build_handler(settings: Settings, refresh_state: RefreshState | None = None) -> type[BaseHTTPRequestHandler]:
+def build_handler(
+    settings: Settings,
+    refresh_state: RefreshState | None = None,
+    viz_cache: VizCache | None = None,
+) -> type[BaseHTTPRequestHandler]:
     refresh_state = refresh_state or RefreshState()
+    viz_cache = viz_cache or VizCache()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "PersonalMemoryHTTP/0.1"
@@ -1476,7 +1550,7 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
                     rel = parsed.path[len("/static/"):]
                     self._send_asset(rel)
                     return
-                status, response = handle_api_get(self.path, settings, refresh_state, self._with_connection)
+                status, response = handle_api_get(self.path, settings, refresh_state, self._with_connection, viz_cache)
                 self._send_json(response, status=status)
             except APIError as exc:
                 self._send_json(_error_payload(exc), status=exc.status)
@@ -1495,7 +1569,7 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
         def do_POST(self) -> None:  # noqa: N802
             try:
                 payload = self._read_json_body()
-                status, response = handle_api_post(self.path, payload, settings, refresh_state, self._with_connection)
+                status, response = handle_api_post(self.path, payload, settings, refresh_state, self._with_connection, viz_cache)
                 self._send_json(response, status=status)
             except APIError as exc:
                 self._send_json(_error_payload(exc), status=exc.status)
