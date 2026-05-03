@@ -309,6 +309,10 @@ def hybrid_search(
                 "semantic_weight": semantic_weight,
                 "keyword_weight": keyword_weight,
             }
-            explanation["final_score"] = item.final_score
             item.score_explanation = explanation
+    # Clamp to [0, 1] so scores remain interpretable regardless of how many boosts fire.
+    for item in merged:
+        item.final_score = round(max(0.0, min(1.0, item.final_score)), 6)
+        if item.score_explanation:
+            item.score_explanation["final_score"] = item.final_score
     return merged[:top_k]
