@@ -21,19 +21,34 @@ function effectiveProviderOrder(store) {
   return Array.isArray(o) && o.length ? o : DEFAULT_PROVIDER_ORDER;
 }
 
+/** All implemented backends (from /api/status); always list these even if omitted from config.json. */
+function supportedProviderIds(store) {
+  const s = store.get("supportedLlmProviders");
+  return Array.isArray(s) && s.length ? s : DEFAULT_PROVIDER_ORDER;
+}
+
+function orderedIntersection(order, ids) {
+  const idSet = new Set(ids);
+  const primary = order.filter((id) => idSet.has(id));
+  const rest = ids.filter((id) => !primary.includes(id));
+  return [...primary, ...rest];
+}
+
 function refillProviderOptions(selectEl, store) {
   const order = effectiveProviderOrder(store);
+  const ids = supportedProviderIds(store);
+  const orderedIds = orderedIntersection(order, ids);
   const prev = selectEl.value;
   clear(selectEl);
-  for (const value of order) {
-    if (!PROVIDER_LABELS[value]) continue;
-    selectEl.appendChild(h("option", { value }, PROVIDER_LABELS[value]));
+  for (const value of orderedIds) {
+    const label = PROVIDER_LABELS[value] || value;
+    selectEl.appendChild(h("option", { value }, label));
   }
-  const allowed = new Set(order.filter((v) => PROVIDER_LABELS[v]));
+  const allowed = new Set(orderedIds);
   if (allowed.has(prev)) {
     selectEl.value = prev;
   } else {
-    const first = order.find((v) => PROVIDER_LABELS[v]);
+    const first = orderedIds[0];
     if (first) selectEl.value = first;
   }
 }
@@ -48,6 +63,17 @@ export function buildRetrievalControls({ store }) {
   refillProviderOptions(provider, store);
   const model = h("input", { type: "text", placeholder: "Model name" });
   const providerStatus = h("div", { class: "pm-empty", style: { fontSize: "var(--pm-text-xs)" } }, "");
+  const supportedHint = h("div", {
+    class: "pm-empty",
+    style: { fontSize: "var(--pm-text-xs)", color: "var(--pm-fg-muted)" },
+  }, "");
+
+  function refreshSupportedHint() {
+    const ids = supportedProviderIds(store);
+    supportedHint.textContent = ids.length
+      ? `Supported providers: ${ids.join(", ")}`
+      : "";
+  }
 
   function syncFromStore() {
     const r = store.get("retrieval") || {};
@@ -95,15 +121,22 @@ export function buildRetrievalControls({ store }) {
       h("label", { class: "pm-field" }, [h("span", null, "Provider"), provider]),
       h("label", { class: "pm-field" }, [h("span", null, "Model"),    model]),
     ]),
+    supportedHint,
     providerStatus,
     h("label", { class: "pm-toggle" }, [useLlm,  h("span", null, "LLM synthesis")]),
     h("label", { class: "pm-toggle" }, [rewrite, h("span", null, "Query rewrite")]),
   ]);
 
   syncFromStore();
+  refreshSupportedHint();
   const offRetrieval = store.on("retrieval", syncFromStore);
   const offOrder = store.on("providerOrder", () => {
     refillProviderOptions(provider, store);
+    syncFromStore();
+  });
+  const offSupported = store.on("supportedLlmProviders", () => {
+    refillProviderOptions(provider, store);
+    refreshSupportedHint();
     syncFromStore();
   });
 
@@ -113,6 +146,6 @@ export function buildRetrievalControls({ store }) {
       providerStatus.textContent = text || "";
       providerStatus.classList.toggle("pm-error", kind === "error");
     },
-    destroy() { offRetrieval(); offOrder(); },
+    destroy() { offRetrieval(); offOrder(); offSupported(); },
   };
 }

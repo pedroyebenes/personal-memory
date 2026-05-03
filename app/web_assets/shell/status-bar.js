@@ -63,6 +63,7 @@ export function buildStatusBar({ store }) {
         providerDefaults: payload.provider_defaults || {},
         providerAvailability: payload.provider_availability || {},
         providerOrder: payload.llm_provider_order || [],
+        supportedLlmProviders: payload.supported_llm_providers || [],
       };
       if (!store.get("retrieval")) {
         patch.retrieval = {

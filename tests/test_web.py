@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from app.config import SUPPORTED_LLM_PROVIDERS, Settings
+from app.config import SUPPORTED_LLM_PROVIDERS, Settings, supported_llm_providers_list
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault
 from app import web
@@ -43,6 +43,7 @@ def test_retrieval_controls_include_mlx_lm_provider() -> None:
     controls = _read_web_asset("components/retrieval-controls.js")
 
     assert "mlx_lm" in controls and "MLX-LM" in controls and "PROVIDER_LABELS" in controls
+    assert "supportedLlmProviders" in controls and "Supported providers:" in controls
 
 
 def test_retrieval_controls_show_llm_options_without_advanced_dropdown() -> None:
@@ -192,6 +193,7 @@ def test_status_reports_config_diagnostics(tmp_path: Path) -> None:
     assert payload["default_llm_provider"] == "invalid-provider"
     assert payload["fallback_llm_provider"] == ""
     assert payload["llm_provider_order"] == list(SUPPORTED_LLM_PROVIDERS)
+    assert payload["supported_llm_providers"] == supported_llm_providers_list()
     diagnostics = payload["config_diagnostics"]
     assert {item["code"] for item in diagnostics} == {"unsupported_provider", "vault_not_found"}
 

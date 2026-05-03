@@ -7,20 +7,33 @@
   "ENABLE_QUERY_REWRITE": false,
   "ENABLE_RERANKING": false,
   "ENABLE_CONCEPT_BOOST": false,
-  "DEFAULT_LLM_PROVIDER": "nvidia",
-  "LLM_PROVIDER": "ollama",
+  "DEFAULT_LLM_PROVIDER": "ollama",
+  "FALLBACK_LLM_PROVIDER": "ollama",
+  "LLM_PROVIDER_ORDER": ["ollama", "openai", "gemini", "nvidia", "mlx_lm"],
   "SYNTHESIS_MODEL_NAME": null,
-  "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
-  "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
-  "NVIDIA_SYNTHESIS_MODEL_NAME": "minimaxai/minimax-m2.7",
-  "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
-  "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/gemma-4-e4b-it-8bit",
-  "OPENAI_API_KEY": null,
-  "OPENAI_BASE_URL": "https://api.openai.com/v1",
-  "GEMINI_API_KEY": null,
-  "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
-  "NVIDIA_API_KEY": null,
-  "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
-  "OLLAMA_BASE_URL": "http://localhost:11434/api",
-  "MLX_LM_BASE_URL": "http://localhost:8080/v1"
+  "PROVIDERS": {
+    "openai": {
+      "api_key": null,
+      "base_url": "https://api.openai.com/v1",
+      "synthesis_model_name": "gpt-5-mini"
+    },
+    "gemini": {
+      "api_key": null,
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "synthesis_model_name": "gemini-2.5-flash"
+    },
+    "nvidia": {
+      "api_key": null,
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "synthesis_model_name": "minimaxai/minimax-m2.7"
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434/api",
+      "synthesis_model_name": "gemma4:e2b"
+    },
+    "mlx_lm": {
+      "base_url": "http://localhost:8080/v1",
+      "synthesis_model_name": "mlx-community/gemma-4-e4b-it-8bit"
+    }
+  }
 }

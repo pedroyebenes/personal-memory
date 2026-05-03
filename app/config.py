@@ -34,6 +34,90 @@ def normalize_provider_name(provider: str | None) -> str:
     return (provider or "").strip().lower().replace("-", "_")
 
 
+def supported_llm_providers_list() -> list[str]:
+    """Stable list of provider ids the app implements (for API / UI)."""
+    return list(SUPPORTED_LLM_PROVIDERS)
+
+
+def _normalize_nested_provider_key(key: str) -> str | None:
+    k = str(key).strip().lower().replace("-", "_")
+    if k in ("model", "model_name", "synthesis_model", "synthesis_model_name"):
+        return "synthesis_model_name"
+    if k in ("api_key", "apikey"):
+        return "api_key"
+    if k in ("base_url", "baseurl", "url"):
+        return "base_url"
+    return None
+
+
+def _flatten_provider_object(obj: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for raw_k, raw_v in obj.items():
+        nk = _normalize_nested_provider_key(str(raw_k))
+        if nk is None:
+            continue
+        out[nk] = raw_v
+    return out
+
+
+def provider_blocks_from_config(file_values: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Merge nested provider settings from PROVIDERS / providers and top-level provider dicts (e.g. NVIDIA: {...})."""
+    merged: dict[str, dict[str, Any]] = {}
+
+    def merge_into(pid: str, obj: dict[str, Any]) -> None:
+        if pid not in SUPPORTED_LLM_PROVIDERS:
+            return
+        flat = _flatten_provider_object(obj)
+        if not flat:
+            return
+        bucket = merged.setdefault(pid, {})
+        bucket.update(flat)
+
+    collective = file_values.get("PROVIDERS") or file_values.get("providers")
+    if isinstance(collective, dict):
+        for name, obj in collective.items():
+            if isinstance(obj, dict):
+                merge_into(normalize_provider_name(str(name)), obj)
+
+    for fk, fv in file_values.items():
+        if fk in ("PROVIDERS", "providers"):
+            continue
+        if isinstance(fv, dict):
+            pid = normalize_provider_name(str(fk))
+            if pid in SUPPORTED_LLM_PROVIDERS:
+                merge_into(pid, fv)
+
+    return merged
+
+
+def _env_nonempty(name: str) -> str | None:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    return str(raw).strip()
+
+
+def _pick_provider_setting(
+    env_name: str,
+    nested: dict[str, dict[str, Any]],
+    pid: str,
+    nested_field: str,
+    flat_file_key: str,
+    file_values: dict[str, Any],
+) -> str | None:
+    ev = _env_nonempty(env_name)
+    if ev is not None:
+        return ev
+    block = nested.get(pid) or {}
+    nv = block.get(nested_field)
+    if nv is not None and str(nv).strip() != "":
+        return str(nv).strip()
+    fv = file_values.get(flat_file_key)
+    if fv is not None and str(fv).strip() != "":
+        return str(fv).strip()
+    return None
+
+
 def _parse_provider_order(value: Any) -> tuple[str, ...]:
     """Parse LLM_PROVIDER_ORDER from JSON (array), comma-separated string, or env."""
     if value is None:
@@ -346,20 +430,83 @@ def load_settings(config_path: str | None = None) -> Settings:
     primary_llm = normalize_provider_name(str(provider_value)) if provider_value not in (None, "") else ""
     fallback_llm = normalize_provider_name(str(fallback_provider_value)) if fallback_provider_value not in (None, "") else ""
     effective_llm = primary_llm or fallback_llm
-    synthesis_value = os.getenv("SYNTHESIS_MODEL_NAME", file_values.get("SYNTHESIS_MODEL_NAME"))
-    openai_synthesis_value = os.getenv("OPENAI_SYNTHESIS_MODEL_NAME", file_values.get("OPENAI_SYNTHESIS_MODEL_NAME"))
-    gemini_synthesis_value = os.getenv("GEMINI_SYNTHESIS_MODEL_NAME", file_values.get("GEMINI_SYNTHESIS_MODEL_NAME"))
-    nvidia_synthesis_value = os.getenv("NVIDIA_SYNTHESIS_MODEL_NAME", file_values.get("NVIDIA_SYNTHESIS_MODEL_NAME"))
-    ollama_synthesis_value = os.getenv("OLLAMA_SYNTHESIS_MODEL_NAME", file_values.get("OLLAMA_SYNTHESIS_MODEL_NAME"))
-    mlx_lm_synthesis_value = os.getenv("MLX_LM_SYNTHESIS_MODEL_NAME", file_values.get("MLX_LM_SYNTHESIS_MODEL_NAME"))
-    openai_api_key = os.getenv("OPENAI_API_KEY", file_values.get("OPENAI_API_KEY"))
-    openai_base_url = os.getenv("OPENAI_BASE_URL", file_values.get("OPENAI_BASE_URL"))
-    gemini_api_key = os.getenv("GEMINI_API_KEY", file_values.get("GEMINI_API_KEY"))
-    gemini_base_url = os.getenv("GEMINI_BASE_URL", file_values.get("GEMINI_BASE_URL"))
-    nvidia_api_key = os.getenv("NVIDIA_API_KEY", file_values.get("NVIDIA_API_KEY"))
-    nvidia_base_url = os.getenv("NVIDIA_BASE_URL", file_values.get("NVIDIA_BASE_URL"))
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", file_values.get("OLLAMA_BASE_URL"))
-    mlx_lm_base_url = os.getenv("MLX_LM_BASE_URL", file_values.get("MLX_LM_BASE_URL"))
+    nested_prov = provider_blocks_from_config(file_values)
+
+    synthesis_env = _env_nonempty("SYNTHESIS_MODEL_NAME")
+    if synthesis_env is not None:
+        synthesis_value: str | None = synthesis_env
+    else:
+        fv_syn = file_values.get("SYNTHESIS_MODEL_NAME")
+        if fv_syn is None or (isinstance(fv_syn, str) and fv_syn.strip() == ""):
+            synthesis_value = None
+        else:
+            synthesis_value = str(fv_syn).strip()
+
+    openai_synthesis_value = _pick_provider_setting(
+        "OPENAI_SYNTHESIS_MODEL_NAME",
+        nested_prov,
+        "openai",
+        "synthesis_model_name",
+        "OPENAI_SYNTHESIS_MODEL_NAME",
+        file_values,
+    )
+    gemini_synthesis_value = _pick_provider_setting(
+        "GEMINI_SYNTHESIS_MODEL_NAME",
+        nested_prov,
+        "gemini",
+        "synthesis_model_name",
+        "GEMINI_SYNTHESIS_MODEL_NAME",
+        file_values,
+    )
+    nvidia_synthesis_value = _pick_provider_setting(
+        "NVIDIA_SYNTHESIS_MODEL_NAME",
+        nested_prov,
+        "nvidia",
+        "synthesis_model_name",
+        "NVIDIA_SYNTHESIS_MODEL_NAME",
+        file_values,
+    )
+    ollama_synthesis_value = _pick_provider_setting(
+        "OLLAMA_SYNTHESIS_MODEL_NAME",
+        nested_prov,
+        "ollama",
+        "synthesis_model_name",
+        "OLLAMA_SYNTHESIS_MODEL_NAME",
+        file_values,
+    )
+    mlx_lm_synthesis_value = _pick_provider_setting(
+        "MLX_LM_SYNTHESIS_MODEL_NAME",
+        nested_prov,
+        "mlx_lm",
+        "synthesis_model_name",
+        "MLX_LM_SYNTHESIS_MODEL_NAME",
+        file_values,
+    )
+
+    openai_api_key = _pick_provider_setting(
+        "OPENAI_API_KEY", nested_prov, "openai", "api_key", "OPENAI_API_KEY", file_values
+    )
+    openai_base_url = _pick_provider_setting(
+        "OPENAI_BASE_URL", nested_prov, "openai", "base_url", "OPENAI_BASE_URL", file_values
+    )
+    gemini_api_key = _pick_provider_setting(
+        "GEMINI_API_KEY", nested_prov, "gemini", "api_key", "GEMINI_API_KEY", file_values
+    )
+    gemini_base_url = _pick_provider_setting(
+        "GEMINI_BASE_URL", nested_prov, "gemini", "base_url", "GEMINI_BASE_URL", file_values
+    )
+    nvidia_api_key = _pick_provider_setting(
+        "NVIDIA_API_KEY", nested_prov, "nvidia", "api_key", "NVIDIA_API_KEY", file_values
+    )
+    nvidia_base_url = _pick_provider_setting(
+        "NVIDIA_BASE_URL", nested_prov, "nvidia", "base_url", "NVIDIA_BASE_URL", file_values
+    )
+    ollama_base_url = _pick_provider_setting(
+        "OLLAMA_BASE_URL", nested_prov, "ollama", "base_url", "OLLAMA_BASE_URL", file_values
+    )
+    mlx_lm_base_url = _pick_provider_setting(
+        "MLX_LM_BASE_URL", nested_prov, "mlx_lm", "base_url", "MLX_LM_BASE_URL", file_values
+    )
     ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
     ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
     breadcrumb_emb_value = os.getenv("USE_BREADCRUMB_EMBEDDINGS", file_values.get("USE_BREADCRUMB_EMBEDDINGS"))

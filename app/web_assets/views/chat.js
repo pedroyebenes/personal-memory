@@ -235,6 +235,7 @@ async function seedRetrievalDefaults(store) {
       providerDefaults: status.provider_defaults || {},
       providerAvailability: status.provider_availability || {},
       providerOrder: status.llm_provider_order || [],
+      supportedLlmProviders: status.supported_llm_providers || [],
     });
   } catch {
     store.set({

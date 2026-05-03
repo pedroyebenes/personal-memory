@@ -52,19 +52,31 @@ The app now defaults to a repo-local `config.json` file. Edit that file before r
   "FALLBACK_LLM_PROVIDER": "ollama",
   "LLM_PROVIDER_ORDER": ["ollama", "openai", "gemini", "nvidia", "mlx_lm"],
   "SYNTHESIS_MODEL_NAME": null,
-  "OPENAI_SYNTHESIS_MODEL_NAME": "gpt-5-mini",
-  "GEMINI_SYNTHESIS_MODEL_NAME": "gemini-2.5-flash",
-  "NVIDIA_SYNTHESIS_MODEL_NAME": "minimaxai/minimax-m2.7",
-  "OLLAMA_SYNTHESIS_MODEL_NAME": "gemma4:e2b",
-  "MLX_LM_SYNTHESIS_MODEL_NAME": "mlx-community/gemma-4-e4b-it-8bit",
-  "OPENAI_API_KEY": null,
-  "OPENAI_BASE_URL": "https://api.openai.com/v1",
-  "GEMINI_API_KEY": null,
-  "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
-  "NVIDIA_API_KEY": null,
-  "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
-  "OLLAMA_BASE_URL": "http://localhost:11434/api",
-  "MLX_LM_BASE_URL": "http://localhost:8080/v1"
+  "PROVIDERS": {
+    "openai": {
+      "api_key": null,
+      "base_url": "https://api.openai.com/v1",
+      "synthesis_model_name": "gpt-5-mini"
+    },
+    "gemini": {
+      "api_key": null,
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "synthesis_model_name": "gemini-2.5-flash"
+    },
+    "nvidia": {
+      "api_key": null,
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "synthesis_model_name": "minimaxai/minimax-m2.7"
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434/api",
+      "synthesis_model_name": "gemma4:e2b"
+    },
+    "mlx_lm": {
+      "base_url": "http://localhost:8080/v1",
+      "synthesis_model_name": "mlx-community/gemma-4-e4b-it-8bit"
+    }
+  }
 }
 ```
 
@@ -73,6 +85,10 @@ By default the repo expects your notes at `./data/vault` and stores SQLite data 
 **Defaults:** `DEFAULT_LLM_PROVIDER` is the primary backend used when nothing else selects a provider (CLI defaults, web UI initial state, chat requests without an explicit `provider`). If it is omitted, `FALLBACK_LLM_PROVIDER` is used. If both are omitted and no environment override is set, no default LLM is configured until you add one of these keys or set `LLM_PROVIDER` / `DEFAULT_LLM_PROVIDER` / `FALLBACK_LLM_PROVIDER` in the environment.
 
 **Web UI provider order:** Optional `LLM_PROVIDER_ORDER` controls the order of entries in the LLM provider dropdown (JSON array of provider ids, or a comma-separated string). Any supported providers you omit are appended in the canonical order.
+
+**Grouped LLM settings (`PROVIDERS`):** Put per-backend options under `PROVIDERS` (or `providers`) with one object per provider id (`openai`, `gemini`, `nvidia`, `ollama`, `mlx_lm`). Each object may include `api_key`, `base_url`, and `synthesis_model_name` (aliases: `model`, `model_name`). You can also use a **top-level** provider object with the same shape, for example `"NVIDIA": { "api_key": "...", "base_url": "..." }`. Legacy flat keys such as `OPENAI_API_KEY` still work. Precedence for each field is **environment variable → nested provider block → flat file key**.
+
+**Supported backends** are built into the app: `ollama`, `openai`, `gemini`, `nvidia`, `mlx_lm`. The web UI always lists every supported provider in the dropdown, even if that provider is missing from `config.json` (unconfigured backends show as unavailable when you enable LLM features). `GET /api/status` includes `supported_llm_providers` for programmatic checks.
 
 Path resolution depends on how you run the app:
 

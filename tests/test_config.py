@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import SUPPORTED_LLM_PROVIDERS, Settings, format_diagnostics, load_settings
+from app.config import (
+    SUPPORTED_LLM_PROVIDERS,
+    Settings,
+    format_diagnostics,
+    load_settings,
+    provider_blocks_from_config,
+)
 
 
 def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
@@ -72,6 +78,45 @@ def test_load_settings_fallback_used_when_no_primary_default(tmp_path: Path) -> 
 
     assert settings.llm_provider == "gemini"
     assert settings.fallback_llm_provider == "gemini"
+
+
+def test_provider_blocks_from_config_collects_nested_and_top_level() -> None:
+    raw = {
+        "PROVIDERS": {
+            "openai": {"api_key": "sk-nested", "base_url": "https://api.example/v1"},
+        },
+        "NVIDIA": {
+            "api_key": "nv-nested",
+            "base_url": "https://nv.example/v1",
+            "model": "custom-model",
+        },
+    }
+    blocks = provider_blocks_from_config(raw)
+    assert blocks["openai"]["api_key"] == "sk-nested"
+    assert blocks["openai"]["base_url"] == "https://api.example/v1"
+    assert blocks["nvidia"]["api_key"] == "nv-nested"
+    assert blocks["nvidia"]["synthesis_model_name"] == "custom-model"
+
+
+def test_load_settings_nested_providers_merge_with_flat(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        """
+        {
+          "FALLBACK_LLM_PROVIDER": "ollama",
+          "OPENAI_API_KEY": "flat-key",
+          "PROVIDERS": {
+            "openai": { "api_key": "nested-wins", "base_url": "https://nested.example/v1" }
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(str(config_path))
+
+    assert settings.openai_api_key == "nested-wins"
+    assert settings.openai_base_url == "https://nested.example/v1"
 
 
 def test_load_settings_primary_default_over_fallback(tmp_path: Path) -> None:

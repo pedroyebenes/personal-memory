@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from app.config import Settings, normalize_provider_name
+from app.config import Settings, normalize_provider_name, supported_llm_providers_list
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
 from app.models import SearchFilters
@@ -1071,6 +1071,7 @@ def handle_api_get(
         summary["provider_defaults"] = settings.synthesis_model_defaults()
         summary["provider_availability"] = settings.provider_availability()
         summary["llm_provider_order"] = list(settings.ordered_llm_providers())
+        summary["supported_llm_providers"] = supported_llm_providers_list()
         summary["enable_reranking"] = settings.enable_reranking
         summary["enable_concept_boost"] = settings.enable_concept_boost
         summary["top_k"] = settings.top_k
