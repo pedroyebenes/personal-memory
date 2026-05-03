@@ -64,100 +64,108 @@ def _build_prompt(question: str, sources: list[dict[str, object]]) -> str:
     )
 
 
+def _call_openai(prompt: str, system_instruction: str, settings: Settings, model_name: str | None) -> str:
+    if not settings.openai_api_key:
+        raise LLMConfigurationError("OPENAI_API_KEY is not configured.")
+    if not model_name:
+        raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
+    payload = {"model": model_name, "instructions": system_instruction, "input": prompt}
+    result = _post_json(
+        settings.openai_base_url.rstrip("/") + "/responses",
+        {"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"},
+        payload,
+    )
+    return _extract_openai_text(result)
+
+
+def _call_gemini(prompt: str, system_instruction: str, settings: Settings, model_name: str | None) -> str:
+    if not settings.gemini_api_key:
+        raise LLMConfigurationError("GEMINI_API_KEY is not configured.")
+    if not model_name:
+        raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
+    payload = {"contents": [{"parts": [{"text": f"{system_instruction}\n\n{prompt}"}]}]}
+    result = _post_json(
+        f"{settings.gemini_base_url.rstrip('/')}/models/{model_name}:generateContent",
+        {"x-goog-api-key": settings.gemini_api_key, "Content-Type": "application/json"},
+        payload,
+    )
+    return _extract_gemini_text(result)
+
+
+def _call_nvidia(prompt: str, system_instruction: str, settings: Settings, model_name: str | None) -> str:
+    if not settings.nvidia_api_key:
+        raise LLMConfigurationError("NVIDIA_API_KEY is not configured.")
+    if not model_name:
+        raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    result = _post_json(
+        settings.nvidia_base_url.rstrip("/") + "/chat/completions",
+        {"Authorization": f"Bearer {settings.nvidia_api_key}", "Content-Type": "application/json"},
+        payload,
+    )
+    return _extract_chat_completions_text(result, provider_name="NVIDIA")
+
+
+def _call_mlx_lm(prompt: str, system_instruction: str, settings: Settings, model_name: str | None) -> str:
+    payload: dict[str, object] = {
+        "messages": [{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    if model_name:
+        payload["model"] = model_name
+    result = _post_json(
+        settings.mlx_lm_base_url.rstrip("/") + "/chat/completions",
+        {"Content-Type": "application/json"},
+        payload,
+    )
+    return _extract_chat_completions_text(result, provider_name="MLX-LM")
+
+
+def _call_ollama(prompt: str, system_instruction: str, settings: Settings, model_name: str | None) -> str:
+    if not model_name:
+        raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
+    payload = {"model": model_name, "prompt": prompt, "system": system_instruction, "stream": False}
+    result = _post_json(
+        settings.ollama_base_url.rstrip("/") + "/generate",
+        {"Content-Type": "application/json"},
+        payload,
+    )
+    response_text = result.get("response")
+    if isinstance(response_text, str) and response_text.strip():
+        return response_text.strip()
+    raise RuntimeError("Ollama response did not contain text output.")
+
+
+_PROVIDER_HANDLERS: dict[str, object] = {
+    "openai": _call_openai,
+    "gemini": _call_gemini,
+    "nvidia": _call_nvidia,
+    "mlx_lm": _call_mlx_lm,
+    "ollama": _call_ollama,
+}
+
+
+def _invoke_provider(provider: str, prompt: str, system_instruction: str, settings: Settings) -> str:
+    handler = _PROVIDER_HANDLERS.get(provider)
+    if handler is None:
+        raise LLMConfigurationError(f"Unsupported LLM_PROVIDER: {provider!r}")
+    model_name = settings.get_synthesis_model_name(provider)
+    return handler(prompt, system_instruction, settings, model_name)  # type: ignore[operator]
+
+
 def _generate_text(prompt: str, settings: Settings, system_instruction: str) -> str:
     provider = normalize_provider_name(settings.llm_provider)
-    model_name = settings.get_synthesis_model_name(provider)
-    if provider == "openai":
-        if not settings.openai_api_key:
-            raise LLMConfigurationError("OPENAI_API_KEY is not configured.")
-        if not model_name:
-            raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
-        payload = {
-            "model": model_name,
-            "instructions": system_instruction,
-            "input": prompt,
-        }
-        result = _post_json(
-            settings.openai_base_url.rstrip("/") + "/responses",
-            {
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            payload,
-        )
-        return _extract_openai_text(result)
-    if provider == "gemini":
-        if not settings.gemini_api_key:
-            raise LLMConfigurationError("GEMINI_API_KEY is not configured.")
-        if not model_name:
-            raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
-        payload = {"contents": [{"parts": [{"text": f"{system_instruction}\n\n{prompt}"}]}]}
-        result = _post_json(
-            f"{settings.gemini_base_url.rstrip('/')}/models/{model_name}:generateContent",
-            {
-                "x-goog-api-key": settings.gemini_api_key,
-                "Content-Type": "application/json",
-            },
-            payload,
-        )
-        return _extract_gemini_text(result)
-    if provider == "nvidia":
-        if not settings.nvidia_api_key:
-            raise LLMConfigurationError("NVIDIA_API_KEY is not configured.")
-        if not model_name:
-            raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt},
-            ],
-            "stream": False,
-        }
-        result = _post_json(
-            settings.nvidia_base_url.rstrip("/") + "/chat/completions",
-            {
-                "Authorization": f"Bearer {settings.nvidia_api_key}",
-                "Content-Type": "application/json",
-            },
-            payload,
-        )
-        return _extract_chat_completions_text(result, provider_name="NVIDIA")
-    if provider == "mlx_lm":
-        payload: dict[str, object] = {
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt},
-            ],
-            "stream": False,
-        }
-        if model_name:
-            payload["model"] = model_name
-        result = _post_json(
-            settings.mlx_lm_base_url.rstrip("/") + "/chat/completions",
-            {"Content-Type": "application/json"},
-            payload,
-        )
-        return _extract_chat_completions_text(result, provider_name="MLX-LM")
-    if provider == "ollama":
-        if not model_name:
-            raise LLMConfigurationError("SYNTHESIS_MODEL_NAME is not configured.")
-        payload = {
-            "model": model_name,
-            "prompt": prompt,
-            "system": system_instruction,
-            "stream": False,
-        }
-        result = _post_json(
-            settings.ollama_base_url.rstrip("/") + "/generate",
-            {"Content-Type": "application/json"},
-            payload,
-        )
-        response_text = result.get("response")
-        if isinstance(response_text, str) and response_text.strip():
-            return response_text.strip()
-        raise RuntimeError("Ollama response did not contain text output.")
-    raise LLMConfigurationError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
+    try:
+        return _invoke_provider(provider, prompt, system_instruction, settings)
+    except LLMConfigurationError:
+        fallback = normalize_provider_name(settings.fallback_llm_provider)
+        if fallback and fallback != provider and fallback in _PROVIDER_HANDLERS:
+            return _invoke_provider(fallback, prompt, system_instruction, settings)
+        raise
 
 
 def _post_json(url: str, headers: dict[str, str], payload: dict[str, object]) -> dict[str, object]:
