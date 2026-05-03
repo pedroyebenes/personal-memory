@@ -128,7 +128,7 @@ def _split_large_section(
     section_title: str | None,
     heading_path: list[str],
     text: str,
-    start_offset: int,
+    _start_offset: int,
     max_words: int,
     overlap_paragraphs: int,
 ) -> list[ChunkRecord]:
@@ -139,78 +139,43 @@ def _split_large_section(
     chunks: list[ChunkRecord] = []
     current: list[str] = []
     current_words = 0
-    chunk_start = start_offset
-    running_offset = start_offset
 
-    for block in blocks:
-        block_words = len(block.split())
-        if block_words > max_words:
-            if current:
-                chunk_text = "\n\n".join(current).strip()
-                chunks.append(
-                    ChunkRecord(
-                        chunk_index=0,
-                        section_title=section_title,
-                        text=chunk_text,
-                        token_estimate=_estimate_tokens(chunk_text),
-                        char_start=chunk_start,
-                        char_end=chunk_start + len(chunk_text),
-                        heading_path=list(heading_path),
-                    )
-                )
-                current = []
-                current_words = 0
-                chunk_start = running_offset
-            chunks.append(
-                ChunkRecord(
-                    chunk_index=0,
-                    section_title=section_title,
-                    text=block,
-                    token_estimate=_estimate_tokens(block),
-                    char_start=running_offset,
-                    char_end=running_offset + len(block),
-                    heading_path=list(heading_path),
-                )
-            )
-            running_offset += len(block) + 2
-            chunk_start = running_offset
-            continue
-
-        if current and current_words + block_words > max_words:
-            chunk_text = "\n\n".join(current).strip()
+    def _flush(current_blocks: list[str]) -> None:
+        chunk_text = "\n\n".join(current_blocks).strip()
+        if chunk_text:
             chunks.append(
                 ChunkRecord(
                     chunk_index=0,
                     section_title=section_title,
                     text=chunk_text,
                     token_estimate=_estimate_tokens(chunk_text),
-                    char_start=chunk_start,
-                    char_end=chunk_start + len(chunk_text),
+                    char_start=0,
+                    char_end=0,
                     heading_path=list(heading_path),
                 )
             )
+
+    for block in blocks:
+        block_words = len(block.split())
+        if block_words > max_words:
+            if current:
+                _flush(current)
+                current = []
+                current_words = 0
+            _flush([block])
+            continue
+
+        if current and current_words + block_words > max_words:
+            _flush(current)
             overlap = current[-overlap_paragraphs:] if overlap_paragraphs > 0 else []
             current = overlap.copy()
             current_words = sum(len(item.split()) for item in current)
-            chunk_start = running_offset - len("\n\n".join(overlap)) if overlap else running_offset
 
         current.append(block)
         current_words += block_words
-        running_offset += len(block) + 2
 
     if current:
-        chunk_text = "\n\n".join(current).strip()
-        chunks.append(
-            ChunkRecord(
-                chunk_index=0,
-                section_title=section_title,
-                text=chunk_text,
-                token_estimate=_estimate_tokens(chunk_text),
-                char_start=chunk_start,
-                char_end=chunk_start + len(chunk_text),
-                heading_path=list(heading_path),
-            )
-        )
+        _flush(current)
     return chunks
 
 
@@ -227,8 +192,8 @@ def _combine_chunks(first: ChunkRecord, second: ChunkRecord) -> ChunkRecord:
         section_title=first.section_title or second.section_title,
         text=combined_text,
         token_estimate=_estimate_tokens(combined_text),
-        char_start=first.char_start,
-        char_end=second.char_end,
+        char_start=0,
+        char_end=0,
         heading_path=list(path),
     )
 
@@ -251,8 +216,8 @@ def chunk_document(
                     section_title=section_title,
                     text=section_text,
                     token_estimate=_estimate_tokens(section_text),
-                    char_start=offset,
-                    char_end=offset + len(section_text),
+                    char_start=0,
+                    char_end=0,
                     heading_path=list(heading_path),
                 )
             )
