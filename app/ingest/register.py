@@ -205,7 +205,6 @@ def _upsert_document(
         "INSERT OR IGNORE INTO document_aliases (document_id, alias) VALUES (?, ?)",
         [(document_id, alias) for alias in parsed.aliases],
     )
-    connection.commit()
     return document_id
 
 
@@ -217,7 +216,6 @@ def _delete_document_chunks(connection: sqlite3.Connection, document_id: int) ->
         connection.executemany("DELETE FROM chunks_fts WHERE chunk_id = ?", [(chunk_id,) for chunk_id in chunk_ids])
         _purge_chunk_vectors_for_chunk_ids(connection, chunk_ids)
     connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
-    connection.commit()
 
 
 def _insert_chunks(connection: sqlite3.Connection, document_id: int, title: str, chunks: list[ChunkRecord]) -> list[int]:
@@ -253,7 +251,6 @@ def _insert_chunks(connection: sqlite3.Connection, document_id: int, title: str,
             """,
             (chunk_id, title, chunk.section_title or "", chunk.text),
         )
-    connection.commit()
     return chunk_ids
 
 
@@ -363,7 +360,6 @@ def _insert_embeddings(connection: sqlite3.Connection, chunk_ids: list[int], tex
     if _chunk_vectors_ready(connection):
         for chunk_id, vector in zip(chunk_ids, vectors):
             _upsert_chunk_vector(connection, chunk_id, vector)
-    connection.commit()
 
 
 def _ingest_single_document(
@@ -393,26 +389,30 @@ def _ingest_single_document(
         LOGGER.info("Skipping unchanged content for %s", path)
         return "skipped", int(existing["id"]), warnings
 
-    document_id = _upsert_document(connection, parsed, content_hash, entry.mtime_iso, entry.size)
-    touched_entities = _entity_ids_for_document_chunks(connection, document_id)
-    _delete_document_chunks(connection, document_id)
-    chunks = chunk_document(parsed.normalized_text)
-    chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
-    if chunk_ids:
-        _insert_embeddings(
-            connection,
-            chunk_ids,
-            _embedding_texts_for_chunks(parsed, chunks, settings),
-            settings,
-        )
-        mentions = extract_concept_mentions(
-            parsed, chunks, existing_normalized_keys=_existing_entity_normalized_keys(connection)
-        )
-        _insert_concept_mentions(connection, chunk_ids, mentions)
-    touched_entities |= _entity_ids_for_document_chunks(connection, document_id)
-    _rebind_entity_counts_for_entities(connection, touched_entities)
-    pruned_local = _prune_orphan_entities(connection)
-    connection.commit()
+    try:
+        document_id = _upsert_document(connection, parsed, content_hash, entry.mtime_iso, entry.size)
+        touched_entities = _entity_ids_for_document_chunks(connection, document_id)
+        _delete_document_chunks(connection, document_id)
+        chunks = chunk_document(parsed.normalized_text)
+        chunk_ids = _insert_chunks(connection, document_id, parsed.title, chunks)
+        if chunk_ids:
+            _insert_embeddings(
+                connection,
+                chunk_ids,
+                _embedding_texts_for_chunks(parsed, chunks, settings),
+                settings,
+            )
+            mentions = extract_concept_mentions(
+                parsed, chunks, existing_normalized_keys=_existing_entity_normalized_keys(connection)
+            )
+            _insert_concept_mentions(connection, chunk_ids, mentions)
+        touched_entities |= _entity_ids_for_document_chunks(connection, document_id)
+        _rebind_entity_counts_for_entities(connection, touched_entities)
+        pruned_local = _prune_orphan_entities(connection)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
     if pruned_local:
         LOGGER.info("Pruned %d orphan entities after indexing %s", pruned_local, path)
     LOGGER.info("Indexed %s with %d chunks", path, len(chunk_ids))
@@ -519,11 +519,13 @@ def reindex_vault(connection: sqlite3.Connection, vault_path: Path, settings: Se
                     )
                     mentions = extract_concept_mentions(parsed, chunks, existing_normalized_keys=frozenset())
                     _insert_concept_mentions(connection, chunk_ids, mentions)
+                connection.commit()
                 indexed += 1
                 changed_document_ids.append(document_id)
                 if file_warnings:
                     warnings.append({"path": str(entry.path), "warnings": file_warnings})
             except Exception as exc:  # noqa: BLE001 — isolate per-file failures
+                connection.rollback()
                 LOGGER.warning("Failed to reindex %s: %s", entry.path, exc)
                 failures.append(_build_failure(entry.path, exc))
     except Exception:
