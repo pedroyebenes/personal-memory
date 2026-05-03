@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     web_parser = subparsers.add_parser("web")
     web_parser.add_argument("--host", default="0.0.0.0")
-    web_parser.add_argument("--port", type=int, default=8000)
+    web_parser.add_argument("--port", type=int, default=8100)
 
     concepts_parser = subparsers.add_parser("concepts")
     concepts_sub = concepts_parser.add_subparsers(dest="concepts_command", required=True)

@@ -32,7 +32,7 @@ personal-memory eval retrieval
 personal-memory web
 ```
 
-Then open `http://127.0.0.1:8000` in your browser locally, or `http://<your-lan-ip>:8000` from another device on your LAN.
+Then open `http://127.0.0.1:8100` in your browser locally, or `http://<your-lan-ip>:8100` from another device on your LAN.
 
 ## Configuration
 
@@ -131,7 +131,7 @@ docker compose down
 docker-compose down
 ```
 
-The web UI is available at `http://localhost:8000`.
+The web UI is available at `http://localhost:8100`.
 
 Compose mounts:
 
@@ -342,7 +342,7 @@ The web UI is a thin local wrapper around the existing backend. It exposes:
 Run it with:
 
 ```bash
-personal-memory web --host 0.0.0.0 --port 8000
+personal-memory web --host 0.0.0.0 --port 8100
 ```
 
 The chat page now includes:

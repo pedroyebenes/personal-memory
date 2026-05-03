@@ -1565,7 +1565,7 @@ def build_handler(settings: Settings, refresh_state: RefreshState | None = None)
     return Handler
 
 
-def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8000) -> None:
+def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8100) -> None:
     with ThreadingHTTPServer((host, port), build_handler(settings)) as server:
         if host == "0.0.0.0":
             print(

@@ -285,7 +285,7 @@ The CLI currently supports:
 - `reindex --vault PATH`
 - `search --query "..."`
 - `ask --query "..."`
-- `web --host 0.0.0.0 --port 8000`
+- `web --host 0.0.0.0 --port 8100`
 
 ### `init-db`
 
