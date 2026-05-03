@@ -16,6 +16,11 @@ from urllib.parse import parse_qs, urlparse
 
 LOGGER = logging.getLogger(__name__)
 
+# Tracks which database paths have already had init_db run so we don't repeat
+# schema migrations on every single HTTP request.
+_initialized_db_paths: set[str] = set()
+_db_init_lock = threading.Lock()
+
 from app.config import Settings, normalize_provider_name, supported_llm_providers_list
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
@@ -1597,7 +1602,12 @@ def build_handler(
         def _with_connection(self, callback):
             connection = connect(settings.database_path)
             try:
-                init_db(connection)
+                db_key = str(settings.database_path)
+                if db_key not in _initialized_db_paths:
+                    with _db_init_lock:
+                        if db_key not in _initialized_db_paths:
+                            init_db(connection)
+                            _initialized_db_paths.add(db_key)
                 return callback(connection)
             finally:
                 connection.close()
@@ -1649,6 +1659,14 @@ def build_handler(
 
 
 def serve_web(settings: Settings, host: str = "0.0.0.0", port: int = 8100) -> None:
+    # Initialize schema once at startup so no request ever pays the migration cost.
+    startup_conn = connect(settings.database_path)
+    try:
+        init_db(startup_conn)
+        _initialized_db_paths.add(str(settings.database_path))
+    finally:
+        startup_conn.close()
+
     with ThreadingHTTPServer((host, port), build_handler(settings)) as server:
         if host == "0.0.0.0":
             print(
