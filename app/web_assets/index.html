@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/styles/base.css">
   <link rel="stylesheet" href="/static/styles/shell.css">
   <link rel="stylesheet" href="/static/styles/components.css">
+  <link rel="stylesheet" href="/static/styles/manuscript.css">
   <script>
     // Apply the saved theme synchronously to avoid a flash. Mirrors the
     // storage key used by lib/storage.js (pm-v2/pref/theme) and lib/theme.js.
@@ -16,8 +17,9 @@
       try {
         var raw = localStorage.getItem("pm-v2/pref/theme");
         var t = raw ? JSON.parse(raw) : "dark";
-        if (t !== "dark" && t !== "light") t = "dark";
+        if (t !== "dark" && t !== "light" && t !== "manuscript") t = "dark";
         document.documentElement.dataset.theme = t;
+        document.body && (document.body.dataset.theme = t);
       } catch (_) {
         document.documentElement.dataset.theme = "dark";
       }

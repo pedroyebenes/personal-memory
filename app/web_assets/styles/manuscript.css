@@ -1,0 +1,161 @@
+/* ═══════════════════════════════════════════════════════════
+   ILLUMINATED MANUSCRIPT THEME — layout & decorative layer
+   Works alongside token overrides in tokens.css.
+   Activated by data-theme="manuscript" on <html>/<body>.
+═══════════════════════════════════════════════════════════ */
+
+/* ── Outer viewport: dark wood frame surround ── */
+[data-theme="manuscript"] body {
+  background: #3d1f0a;
+}
+
+/* Inset the app so it sits inside the decorative border */
+[data-theme="manuscript"] .pm-app {
+  margin: 40px;
+  height: calc(100vh - 80px);
+  box-shadow: 0 0 80px rgba(0, 0, 0, 0.7), 0 0 20px rgba(0, 0, 0, 0.5) inset;
+  border-radius: 1px;
+}
+
+/* ── Decorative border overlay (pointer-events:none so it doesn't block clicks) ── */
+[data-theme="manuscript"] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  border: 40px solid transparent;
+  border-image-source: url('/static/images/manuscript-border.svg');
+  border-image-slice: 100;
+  border-image-width: 40px;
+  border-image-repeat: round;
+}
+
+/* ── Parchment texture for the main content area ── */
+[data-theme="manuscript"] .pm-main {
+  background:
+    radial-gradient(ellipse at 8%  12%, rgba(139, 90, 43, 0.07) 0%, transparent 38%),
+    radial-gradient(ellipse at 92% 88%, rgba(90,  60, 20, 0.06) 0%, transparent 35%),
+    radial-gradient(ellipse at 55% 45%, rgba(200,160, 80, 0.04) 0%, transparent 55%),
+    var(--pm-bg-base);
+}
+
+/* ── Header: warm vellum with subtle gradient ── */
+[data-theme="manuscript"] .pm-header {
+  background:
+    radial-gradient(ellipse at 0% 120%, rgba(80, 45, 15, 0.12) 0%, transparent 40%),
+    var(--pm-bg-panel);
+  border-bottom: 1px solid var(--pm-border-strong);
+}
+
+/* ── Nav links: italic on active, tighter spacing ── */
+[data-theme="manuscript"] .pm-nav-link[aria-current="page"] {
+  font-style: italic;
+}
+
+/* ── Brand wordmark ── */
+[data-theme="manuscript"] .pm-brand {
+  letter-spacing: 0.05em;
+}
+
+/* ── Status bar ── */
+[data-theme="manuscript"] .pm-status-bar {
+  border-left: 1px solid var(--pm-border-soft);
+}
+
+/* ── Workbench rail: aged paper tint ── */
+[data-theme="manuscript"] .pm-workbench-rail {
+  background: var(--pm-bg-rail);
+  border-right-color: var(--pm-border-strong);
+}
+
+/* ── Cards: stiff vellum look ── */
+[data-theme="manuscript"] .pm-card {
+  border-color: var(--pm-border-strong);
+  border-radius: 2px;
+}
+
+/* ── Inputs: parchment field ── */
+[data-theme="manuscript"] input[type="text"],
+[data-theme="manuscript"] input[type="search"],
+[data-theme="manuscript"] textarea {
+  border-radius: 2px;
+  border-color: var(--pm-border-strong);
+  background: var(--pm-bg-canvas);
+}
+
+/* ── Buttons: squared corners, ink look ── */
+[data-theme="manuscript"] .pm-btn {
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+
+/* ── Section titles: all-caps with wider tracking ── */
+[data-theme="manuscript"] .pm-section-title {
+  letter-spacing: 0.14em;
+  color: var(--pm-accent);
+}
+
+/* ── Horizontal rules: ornamental ink line ── */
+[data-theme="manuscript"] hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--pm-border-strong) 20%,
+    var(--pm-accent-line)   50%,
+    var(--pm-border-strong) 80%,
+    transparent
+  );
+  margin: var(--pm-sp-5) 0;
+}
+
+/* ── Scrollbars: ink-on-parchment ── */
+[data-theme="manuscript"] ::-webkit-scrollbar       { width: 7px; height: 7px; }
+[data-theme="manuscript"] ::-webkit-scrollbar-track  { background: transparent; }
+[data-theme="manuscript"] ::-webkit-scrollbar-thumb  {
+  background: var(--pm-border-strong);
+  border-radius: 0;
+}
+[data-theme="manuscript"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--pm-accent-line);
+}
+
+/* ── Drop cap for the first paragraph of long prose ── */
+[data-theme="manuscript"] .pm-prose > p:first-of-type::first-letter {
+  font-size: 3em;
+  font-weight: 400;
+  float: left;
+  line-height: 0.78;
+  margin: 0.04em 0.1em 0 0;
+  color: var(--pm-accent);
+}
+
+/* ── Manuscript toggle button: lit up when active ── */
+.pm-manuscript-btn {
+  font-size: var(--pm-text-md);
+  opacity: 0.75;
+  transition: opacity var(--pm-dur-fast) var(--pm-ease),
+              color    var(--pm-dur-fast) var(--pm-ease);
+}
+.pm-manuscript-btn:hover                     { opacity: 1; }
+.pm-manuscript-btn[aria-pressed="true"]      { color: var(--pm-accent); opacity: 1; }
+
+/* Ensure the button still picks up the manuscript accent colour
+   when the manuscript theme is itself active */
+[data-theme="manuscript"] .pm-manuscript-btn[aria-pressed="true"] {
+  color: var(--pm-accent);
+}
+
+/* ── Mobile: narrower frame ── */
+@media (max-width: 600px) {
+  [data-theme="manuscript"] .pm-app {
+    margin: 20px;
+    height: calc(100vh - 40px);
+  }
+  [data-theme="manuscript"] body::before {
+    border-width: 20px;
+    border-image-width: 20px;
+  }
+}

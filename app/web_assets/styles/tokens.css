@@ -89,6 +89,56 @@
   --pm-rail-w:      280px;
 }
 
+/* ── Manuscript (illuminated codex) theme ───────────
+   Single-mode theme: no light/dark variant.
+   Activated by data-theme="manuscript". */
+[data-theme="manuscript"] {
+  /* Surfaces — aged parchment */
+  --pm-bg-base:     #f0e4c2;
+  --pm-bg-canvas:   #f8f0d8;
+  --pm-bg-panel:    rgba(245, 235, 200, 0.96);
+  --pm-bg-overlay:  rgba(248, 240, 215, 0.98);
+  --pm-bg-hover:    rgba(80, 45, 15, 0.06);
+  --pm-bg-active:   rgba(80, 45, 15, 0.11);
+
+  /* Borders — ink */
+  --pm-border:        rgba(80, 45, 15, 0.20);
+  --pm-border-soft:   rgba(80, 45, 15, 0.11);
+  --pm-border-strong: rgba(80, 45, 15, 0.36);
+
+  /* Foreground — dark ink */
+  --pm-fg:       #2c1a0e;
+  --pm-fg-muted: #6b4020;
+  --pm-fg-dim:   #9c7040;
+  --pm-fg-faint: #c9a870;
+
+  /* Accent — medieval gold */
+  --pm-accent:        #8a6015;
+  --pm-accent-hover:  #6a4a10;
+  --pm-accent-soft:   rgba(138, 96, 21, 0.13);
+  --pm-accent-line:   rgba(138, 96, 21, 0.32);
+  --pm-accent-strong: rgba(138, 96, 21, 0.55);
+
+  /* Semantic */
+  --pm-noise:   #a07840;
+  --pm-warning: #8b4513;
+  --pm-error:   #8b1818;
+
+  /* Shadows */
+  --pm-shadow-md: 0 4px 18px rgba(80, 40, 10, 0.18);
+  --pm-shadow-lg: 0 12px 40px rgba(80, 40, 10, 0.28);
+
+  /* Elevated surfaces */
+  --pm-bg-rail:    rgba(235, 215, 170, 0.75);
+  --pm-bg-card:    rgba(248, 238, 210, 0.65);
+  --pm-bg-inset:   rgba(80, 45, 15, 0.06);
+  --pm-text-shadow-strong: 0 1px 2px rgba(255, 245, 220, 0.7);
+  --pm-bg-tooltip: rgba(248, 240, 215, 0.96);
+
+  /* Typography — serif throughout */
+  --pm-font-sans: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+}
+
 /* ── Light theme override ────────────────────────────
    Activated by setting `data-theme="light"` on the root or body element.
    Components consume these tokens, so flipping the data attribute

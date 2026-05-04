@@ -1,6 +1,6 @@
 import { h, mount } from "../lib/h.js";
 import { getStatus, postRefresh, getRefreshStatus } from "../lib/api.js";
-import { applyTheme, toggleTheme, loadTheme } from "../lib/theme.js";
+import { applyTheme, toggleTheme, toggleManuscript, loadTheme } from "../lib/theme.js";
 
 const POLL_MS = 5000;
 
@@ -8,22 +8,48 @@ export function buildStatusBar({ store }) {
   const stats = h("div", { class: "pm-status-stats" }, "Loading…");
   const warning = h("span", { class: "pm-status-warning", hidden: true });
 
+  const initial = loadTheme();
+  applyTheme(initial);
+
   const themeBtn = h("button", {
     type: "button",
     class: "pm-status-refresh",
-    title: "Toggle theme",
-    "aria-label": "Toggle theme",
+    title: "Toggle light/dark theme",
+    "aria-label": "Toggle light/dark theme",
     onclick: () => {
       const next = toggleTheme();
-      themeBtn.textContent = next === "light" ? "☾" : "☀";
-      themeBtn.setAttribute("aria-label", next === "light" ? "Switch to dark theme" : "Switch to light theme");
+      syncThemeBtn(next);
+      syncManuscriptBtn(next);
       store?.set({ theme: next });
     },
   });
-  const initial = loadTheme();
-  applyTheme(initial);
-  themeBtn.textContent = initial === "light" ? "☾" : "☀";
-  themeBtn.setAttribute("aria-label", initial === "light" ? "Switch to dark theme" : "Switch to light theme");
+
+  const manuscriptBtn = h("button", {
+    type: "button",
+    class: "pm-status-refresh pm-manuscript-btn",
+    title: "Toggle illuminated manuscript theme",
+    "aria-label": "Toggle manuscript theme",
+    "aria-pressed": initial === "manuscript" ? "true" : "false",
+    onclick: () => {
+      const next = toggleManuscript();
+      syncThemeBtn(next);
+      syncManuscriptBtn(next);
+      store?.set({ theme: next });
+    },
+  }, "⚜");
+
+  function syncThemeBtn(theme) {
+    const isDark = theme !== "light";
+    themeBtn.textContent = isDark ? "☀" : "☾";
+    themeBtn.setAttribute("aria-label", isDark ? "Switch to light theme" : "Switch to dark theme");
+  }
+
+  function syncManuscriptBtn(theme) {
+    const active = theme === "manuscript";
+    manuscriptBtn.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  syncThemeBtn(initial);
 
   const refreshBtn = h("button", {
     type: "button",
@@ -32,7 +58,7 @@ export function buildStatusBar({ store }) {
   }, "Refresh");
 
   const root = h("div", { class: "pm-status-bar", role: "status" }, [
-    stats, warning, themeBtn, refreshBtn,
+    stats, warning, manuscriptBtn, themeBtn, refreshBtn,
   ]);
 
   let pollTimer = null;
