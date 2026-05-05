@@ -14,13 +14,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-LOGGER = logging.getLogger(__name__)
-
-# Tracks which database paths have already had init_db run so we don't repeat
-# schema migrations on every single HTTP request.
-_initialized_db_paths: set[str] = set()
-_db_init_lock = threading.Lock()
-
 from app.config import Settings, normalize_provider_name, supported_llm_providers_list
 from app.db import connect, init_db
 from app.ingest.register import ingest_vault, refresh_concepts, status_summary
@@ -38,6 +31,13 @@ from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.qa import answer_question
 from app.retrieval.semantic_search import semantic_search_mode
 from app.util.timestamps import utc_now_iso
+
+LOGGER = logging.getLogger(__name__)
+
+# Tracks which database paths have already had init_db run so we don't repeat
+# schema migrations on every single HTTP request.
+_initialized_db_paths: set[str] = set()
+_db_init_lock = threading.Lock()
 
 WEB_ASSETS_ROOT = Path(__file__).with_name("web_assets").resolve()
 
@@ -1384,6 +1384,8 @@ def handle_api_get(
                 details={"concept_id": concept_id},
             )
         return HTTPStatus.OK, _success_payload(detail)
+    if parsed.path == "/api/refresh-status":
+        return HTTPStatus.OK, _success_payload(refresh_state.snapshot())
     if parsed.path == "/api/search":
         query_params = parse_qs(parsed.query)
         query = query_params.get("query", [""])[0].strip()
@@ -1438,25 +1440,27 @@ def handle_api_post(
                 status=HTTPStatus.BAD_REQUEST,
             )
         refresh_state.begin()
-        try:
-            summary = with_connection(
-                lambda conn: {
-                    **ingest_vault(conn, settings.vault_path, settings),
-                    "concepts": refresh_concepts(conn, settings),
-                }
-            )
-        except Exception as exc:
-            refresh_state.finish({"status": "failed", "error": str(exc)})
-            raise APIError(
-                "refresh_failed",
-                f"Refresh failed: {exc}",
-                status=HTTPStatus.INTERNAL_SERVER_ERROR,
-                details={"refresh_state": refresh_state.snapshot()},
-            ) from exc
-        refresh_state.finish(dict(summary))
-        if viz_cache is not None:
-            viz_cache.invalidate()
-        return HTTPStatus.OK, _success_payload(summary)
+
+        def _run_refresh() -> None:
+            try:
+                conn = connect(settings.database_path)
+                try:
+                    summary = {
+                        **ingest_vault(conn, settings.vault_path, settings),
+                        "concepts": refresh_concepts(conn, settings),
+                    }
+                finally:
+                    conn.close()
+            except Exception as exc:
+                refresh_state.finish({"status": "failed", "error": str(exc)})
+                LOGGER.error("Background refresh failed: %s", exc)
+                return
+            refresh_state.finish(dict(summary))
+            if viz_cache is not None:
+                viz_cache.invalidate()
+
+        threading.Thread(target=_run_refresh, daemon=True).start()
+        return HTTPStatus.ACCEPTED, _success_payload({"status": "started", "refresh_state": refresh_state.snapshot()})
     if parsed.path == "/api/concepts/refresh":
         result = with_connection(lambda conn: refresh_concepts(conn, settings))
         return HTTPStatus.OK, _success_payload(result)
