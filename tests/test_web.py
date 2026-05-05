@@ -69,6 +69,14 @@ def test_chat_view_only_shows_provider_for_llm_answers() -> None:
     assert "Model:" in chat
 
 
+def test_evidence_card_links_to_docs_reader() -> None:
+    card = _read_web_asset("components/evidence-card.js")
+
+    assert "Read in Docs" in card
+    assert "selectedDocumentPath" in card
+    assert '"#/docs"' in card
+
+
 def test_design_tokens_define_observatory_palette() -> None:
     tokens = _read_web_asset("styles/tokens.css")
     # The single source of truth for color/type/spacing tokens.

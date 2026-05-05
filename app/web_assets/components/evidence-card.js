@@ -59,12 +59,22 @@ export function buildEvidenceCard(result, { store, terms = [] } = {}) {
   const sourceRef = result.source_ref || `${title} (${path})`;
   const markdownRef = result.markdown_ref || `> ${snippet}\n\n— ${sourceRef}`;
 
+  const docsHref = path ? "#/docs" : null;
   const obsidianHref = path ? `obsidian://open?path=${encodeURIComponent(path)}` : null;
 
   const actions = h("div", { class: "pm-evidence-actions" }, [
     h("button", { type: "button", onclick: () => copy(path), title: "Copy path" }, "Copy path"),
     h("button", { type: "button", onclick: () => copy(sourceRef), title: "Copy source ref" }, "Copy ref"),
     h("button", { type: "button", onclick: () => copy(markdownRef), title: "Copy markdown" }, "Copy md"),
+    docsHref && h("a", {
+      href: docsHref,
+      class: "pm-evidence-action-link",
+      style: { color: "var(--pm-fg-muted)" },
+      title: "Read in Docs",
+      onclick: () => {
+        if (store && path) store.set({ selectedDocumentPath: path });
+      },
+    }, "Read in Docs"),
     obsidianHref && h("a", { href: obsidianHref, class: "pm-evidence-action-link", style: { color: "var(--pm-fg-muted)" }, title: "Open in Obsidian" }, "↗ Obsidian"),
   ]);
 
