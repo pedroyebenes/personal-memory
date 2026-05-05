@@ -17,6 +17,9 @@ DEFAULT_ENABLE_QUERY_REWRITE = False
 DEFAULT_ENABLE_RERANKING = False
 DEFAULT_ENABLE_CONCEPT_BOOST = False
 DEFAULT_USE_BREADCRUMB_EMBEDDINGS = True
+DEFAULT_RETRIEVAL_CANDIDATE_MULTIPLIER = 10
+DEFAULT_RETRIEVAL_CANDIDATE_MIN = 50
+DEFAULT_RETRIEVAL_CANDIDATE_MAX = 200
 DEFAULT_CONCEPT_BOOST_WEIGHT = 0.06
 DEFAULT_CONCEPT_BOOST_EXACT_MAX = 0.15
 DEFAULT_RERANK_MAX_BOOST = 0.18
@@ -170,6 +173,9 @@ class Settings:
     ingest_include: tuple[str, ...] = ()
     ingest_exclude: tuple[str, ...] = ()
     use_breadcrumb_embeddings: bool = DEFAULT_USE_BREADCRUMB_EMBEDDINGS
+    retrieval_candidate_multiplier: int = DEFAULT_RETRIEVAL_CANDIDATE_MULTIPLIER
+    retrieval_candidate_min: int = DEFAULT_RETRIEVAL_CANDIDATE_MIN
+    retrieval_candidate_max: int = DEFAULT_RETRIEVAL_CANDIDATE_MAX
     llm_provider_order: tuple[str, ...] = ()
     concept_boost_weight: float = DEFAULT_CONCEPT_BOOST_WEIGHT
     concept_boost_exact_max: float = DEFAULT_CONCEPT_BOOST_EXACT_MAX
@@ -530,6 +536,18 @@ def load_settings(config_path: str | None = None) -> Settings:
     ingest_include_value = os.getenv("INGEST_INCLUDE", file_values.get("INGEST_INCLUDE"))
     ingest_exclude_value = os.getenv("INGEST_EXCLUDE", file_values.get("INGEST_EXCLUDE"))
     breadcrumb_emb_value = os.getenv("USE_BREADCRUMB_EMBEDDINGS", file_values.get("USE_BREADCRUMB_EMBEDDINGS"))
+    retrieval_candidate_multiplier_value = os.getenv(
+        "RETRIEVAL_CANDIDATE_MULTIPLIER",
+        file_values.get("RETRIEVAL_CANDIDATE_MULTIPLIER"),
+    )
+    retrieval_candidate_min_value = os.getenv(
+        "RETRIEVAL_CANDIDATE_MIN",
+        file_values.get("RETRIEVAL_CANDIDATE_MIN"),
+    )
+    retrieval_candidate_max_value = os.getenv(
+        "RETRIEVAL_CANDIDATE_MAX",
+        file_values.get("RETRIEVAL_CANDIDATE_MAX"),
+    )
     concept_boost_weight_value = os.getenv("CONCEPT_BOOST_WEIGHT", file_values.get("CONCEPT_BOOST_WEIGHT"))
     concept_boost_exact_max_value = os.getenv("CONCEPT_BOOST_EXACT_MAX", file_values.get("CONCEPT_BOOST_EXACT_MAX"))
     rerank_max_boost_value = os.getenv("RERANK_MAX_BOOST", file_values.get("RERANK_MAX_BOOST"))
@@ -574,6 +592,21 @@ def load_settings(config_path: str | None = None) -> Settings:
         ingest_include=_parse_pattern_list(ingest_include_value),
         ingest_exclude=_parse_pattern_list(ingest_exclude_value),
         use_breadcrumb_embeddings=_parse_bool(breadcrumb_emb_value, DEFAULT_USE_BREADCRUMB_EMBEDDINGS),
+        retrieval_candidate_multiplier=_parse_positive_int(
+            retrieval_candidate_multiplier_value,
+            DEFAULT_RETRIEVAL_CANDIDATE_MULTIPLIER,
+            "RETRIEVAL_CANDIDATE_MULTIPLIER",
+        ),
+        retrieval_candidate_min=_parse_positive_int(
+            retrieval_candidate_min_value,
+            DEFAULT_RETRIEVAL_CANDIDATE_MIN,
+            "RETRIEVAL_CANDIDATE_MIN",
+        ),
+        retrieval_candidate_max=_parse_positive_int(
+            retrieval_candidate_max_value,
+            DEFAULT_RETRIEVAL_CANDIDATE_MAX,
+            "RETRIEVAL_CANDIDATE_MAX",
+        ),
         llm_provider_order=_parse_provider_order(order_value),
         concept_boost_weight=_parse_positive_float(concept_boost_weight_value, DEFAULT_CONCEPT_BOOST_WEIGHT, "CONCEPT_BOOST_WEIGHT"),
         concept_boost_exact_max=_parse_positive_float(concept_boost_exact_max_value, DEFAULT_CONCEPT_BOOST_EXACT_MAX, "CONCEPT_BOOST_EXACT_MAX"),

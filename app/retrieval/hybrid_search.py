@@ -22,6 +22,15 @@ EXACT_CONCEPT_BOOST_STEP = 0.08
 EXACT_CONCEPT_BOOST_MAX = 0.15  # default; overridden per-request by Settings.concept_boost_exact_max
 
 
+def _retrieval_candidate_limit(settings: Settings, top_k: int) -> int:
+    requested = max(1, top_k)
+    multiplier = max(1, settings.retrieval_candidate_multiplier)
+    minimum = max(1, settings.retrieval_candidate_min)
+    maximum = max(1, settings.retrieval_candidate_max)
+    widened = max(minimum, requested * multiplier)
+    return max(requested, min(maximum, widened))
+
+
 def _normalize_filters(filters: SearchFilters | None) -> SearchFilters:
     return filters or SearchFilters()
 
@@ -254,8 +263,12 @@ def hybrid_search(
         settings.enable_concept_boost if use_concept_boost is None else use_concept_boost
     )
     terms = query_terms(query)
-    keyword_results = {result.chunk_id: result for result in keyword_search(connection, query, top_k=top_k * 2)}
-    semantic_results = {result.chunk_id: result for result in semantic_search(connection, query, settings, top_k=top_k * 2)}
+    candidate_limit = _retrieval_candidate_limit(settings, top_k)
+    keyword_results = {result.chunk_id: result for result in keyword_search(connection, query, top_k=candidate_limit)}
+    semantic_results = {
+        result.chunk_id: result
+        for result in semantic_search(connection, query, settings, top_k=candidate_limit)
+    }
     metadata = _load_chunk_metadata(connection, set(keyword_results) | set(semantic_results))
     now = datetime.now(timezone.utc)
 
@@ -292,7 +305,9 @@ def hybrid_search(
                 markdown_ref=build_markdown_ref(base.document_title, base.source_path, base.section_title),
             )
         )
+    candidate_count_before_filters = len(merged)
     merged = [item for item in merged if _matches_filters(item, filters, metadata)]
+    candidate_count_after_filters = len(merged)
     if should_boost_concepts:
         for item in merged:
             explanation = item.score_explanation or {}
@@ -318,6 +333,9 @@ def hybrid_search(
                 "semantic_weight": semantic_weight,
                 "keyword_weight": keyword_weight,
             }
+            explanation["candidate_limit"] = candidate_limit
+            explanation["candidate_count_before_filters"] = candidate_count_before_filters
+            explanation["candidate_count_after_filters"] = candidate_count_after_filters
             item.score_explanation = explanation
     # Clamp to [0, 1] so scores remain interpretable regardless of how many boosts fire.
     for item in merged:

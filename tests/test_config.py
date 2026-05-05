@@ -38,6 +38,34 @@ def test_load_settings_reads_json_config_file(tmp_path: Path) -> None:
     assert settings.llm_provider == "ollama"
 
 
+def test_settings_default_retrieval_candidate_sizing() -> None:
+    settings = Settings()
+
+    assert settings.retrieval_candidate_multiplier == 10
+    assert settings.retrieval_candidate_min == 50
+    assert settings.retrieval_candidate_max == 200
+
+
+def test_load_settings_reads_retrieval_candidate_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        """
+        {
+          "RETRIEVAL_CANDIDATE_MULTIPLIER": 8,
+          "RETRIEVAL_CANDIDATE_MIN": 24,
+          "RETRIEVAL_CANDIDATE_MAX": 160
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(str(config_path))
+
+    assert settings.retrieval_candidate_multiplier == 8
+    assert settings.retrieval_candidate_min == 24
+    assert settings.retrieval_candidate_max == 160
+
+
 def test_environment_variables_override_json_config(
     tmp_path: Path, monkeypatch
 ) -> None:
