@@ -36,6 +36,37 @@ def test_answer_question_uses_llm_when_available(connection, fixture_vault, sett
     assert response["provider"] == "ollama"
 
 
+def test_synthesis_prompt_asks_for_evidence_language(settings, monkeypatch) -> None:
+    captured = {}
+
+    def fake_generate_text(prompt, local_settings, system_instruction):
+        captured["prompt"] = prompt
+        captured["settings"] = local_settings
+        captured["system_instruction"] = system_instruction
+        return "Respuesta fundamentada [Source 1]"
+
+    monkeypatch.setattr(llm, "_generate_text", fake_generate_text)
+
+    answer = llm.synthesize_answer(
+        "What did the note decide?",
+        [
+            {
+                "document_title": "Nota",
+                "source_path": "/tmp/nota.md",
+                "section_title": "Resumen",
+                "chunk_id": "1",
+                "snippet": "La decisión fue responder en español.",
+            }
+        ],
+        settings,
+    )
+
+    assert answer == "Respuesta fundamentada [Source 1]"
+    assert "Answer in the primary language of the evidence snippets" in captured["prompt"]
+    assert "If sources use multiple languages" in captured["prompt"]
+    assert "La decisión fue responder en español." in captured["prompt"]
+
+
 def test_answer_question_keeps_rewrite_warnings_when_no_results(connection, settings, monkeypatch) -> None:
     monkeypatch.setattr(qa, "resolve_retrieval_query", lambda *args, **kwargs: ("rewritten", ["rewrite failed"]))
     monkeypatch.setattr(qa, "hybrid_search", lambda *args, **kwargs: [])

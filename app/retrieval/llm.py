@@ -58,6 +58,8 @@ def _build_prompt(question: str, sources: list[dict[str, object]]) -> str:
         "- Do not introduce facts that are not in the sources.\n"
         "- If the evidence is insufficient, say so plainly.\n"
         "- Cite supporting claims inline using [Source N].\n"
+        "- Answer in the primary language of the evidence snippets, even if the question uses another language.\n"
+        "- If sources use multiple languages, use the language of the most relevant evidence.\n"
         "- Keep the answer concise and readable.\n\n"
         f"Question:\n{question}\n\n"
         f"Sources:\n{_format_sources(sources)}"
