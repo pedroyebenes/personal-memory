@@ -44,6 +44,7 @@ class RetrievalResult:
     matched_concepts: list[dict[str, object]] | None = None
     source_ref: str | None = None
     markdown_ref: str | None = None
+    document_id: int | None = None
 
 
 @dataclass(slots=True)

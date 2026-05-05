@@ -1,4 +1,4 @@
-import { h, mount, clear } from "../lib/h.js";
+import { h, clear } from "../lib/h.js";
 import { getStatus, postChat } from "../lib/api.js";
 import { loadWorkspaces, saveWorkspaces, pushRecent } from "../lib/storage.js";
 import { buildFilters } from "../components/filters.js";
@@ -6,6 +6,8 @@ import { buildRetrievalControls } from "../components/retrieval-controls.js";
 import { buildEvidenceCard } from "../components/evidence-card.js";
 
 const ANSWER_PLACEHOLDER = "Ask a question to start a workspace.";
+const HISTORY_TURN_LIMIT = 6;
+const HISTORY_SOURCE_LIMIT = 5;
 
 export const chatView = {
   mount(target, { store }) {
@@ -22,12 +24,18 @@ export const chatView = {
       rows: "3",
     });
     const askBtn = h("button", { class: "pm-primary", type: "submit" }, "Ask");
+    const newThreadBtn = h("button", {
+      class: "pm-chip pm-chip-muted",
+      type: "button",
+      onclick: () => startNewThread(),
+    }, "New thread");
 
     const workspaceTabs = h("div", { class: "pm-workspaces", role: "tablist", "aria-label": "Answer workspaces" });
     const answerDetail = h("section", { class: "pm-card pm-empty" }, ANSWER_PLACEHOLDER);
 
     const composer = h("form", { class: "pm-composer", onsubmit: (e) => { e.preventDefault(); ask(); } }, [
-      queryInput, askBtn,
+      queryInput,
+      h("div", { style: { display: "flex", gap: "var(--pm-sp-2)", alignItems: "center" } }, [askBtn, newThreadBtn]),
     ]);
 
     const main = h("section", { class: "pm-workbench-main" }, [composer, workspaceTabs, answerDetail]);
@@ -52,14 +60,27 @@ export const chatView = {
       const query = queryInput.value.trim();
       if (!query) return;
       askBtn.disabled = true;
-      const r = store.get("retrieval") || {};
-      const filtersValue = store.get("filters") || {};
-      const ws = createWorkspace({ query, filters: filtersValue, retrieval: r });
-      pushWorkspace(store, ws);
+      const r = { ...(store.get("retrieval") || {}) };
+      const filtersValue = { ...(store.get("filters") || {}) };
+      const turn = createTurn({ query, filters: filtersValue, retrieval: r });
+      let ws = normalizeWorkspace(activeWorkspace(store));
+      if (!ws) {
+        ws = createWorkspace({ turn, filters: filtersValue, retrieval: r });
+        pushWorkspace(store, ws);
+      } else {
+        ws.turns = [...(ws.turns || []), turn];
+        ws.retrieval = r;
+        ws.filters = filtersValue;
+        ws.status = "loading";
+        ws.updated_at = new Date().toISOString();
+        replaceWorkspace(store, ws);
+      }
       queryInput.value = "";
+      const history = buildHistoryPayload(ws, turn.id);
       try {
         const payload = await postChat({
           query,
+          history,
           use_llm: !!r.useLlm,
           rewrite_query: !!r.rewrite,
           rerank: !!r.rerank,
@@ -69,27 +90,36 @@ export const chatView = {
           model: r.model || "",
           filters: filtersValue,
         });
+        turn.status = "ready";
+        turn.answer = payload.answer || "(no answer)";
+        turn.answer_mode = payload.answer_mode || "";
+        turn.sources = payload.sources || [];
+        turn.retrieval_query = payload.retrieval_query || query;
+        turn.provider = payload.provider || turn.provider;
+        turn.model = payload.model || turn.model;
+        turn.warnings = payload.warnings || [];
         ws.status = "ready";
-        ws.answer = payload.answer || "(no answer)";
-        ws.answer_mode = payload.answer_mode || "";
-        ws.sources = payload.sources || [];
-        ws.retrieval_query = payload.retrieval_query || query;
-        ws.provider = payload.provider || ws.provider;
-        ws.model = payload.model || ws.model;
-        ws.warnings = payload.warnings || [];
+        ws.updated_at = new Date().toISOString();
         pushRecent(query);
       } catch (err) {
+        turn.status = "error";
+        turn.answer = err.message || "Request failed.";
+        turn.warnings = [turn.answer];
         ws.status = "error";
-        ws.answer = err.message || "Request failed.";
-        ws.warnings = [ws.answer];
+        ws.updated_at = new Date().toISOString();
       } finally {
         replaceWorkspace(store, ws);
         askBtn.disabled = false;
       }
     }
 
+    function startNewThread() {
+      store.set({ activeWorkspaceId: null });
+      queryInput.focus();
+    }
+
     function renderWorkspaceTabs() {
-      const list = store.get("workspaces") || [];
+      const list = (store.get("workspaces") || []).map(normalizeWorkspace).filter(Boolean);
       const activeId = store.get("activeWorkspaceId");
       clear(workspaceTabs);
       if (!list.length) return;
@@ -99,9 +129,9 @@ export const chatView = {
           class: "pm-workspace-tab",
           "aria-pressed": ws.id === activeId ? "true" : "false",
           onclick: () => store.set({ activeWorkspaceId: ws.id }),
-          title: ws.question,
+          title: ws.title || ws.question,
         }, [
-          h("span", { class: "pm-ws-label" }, ws.question),
+          h("span", { class: "pm-ws-label" }, ws.title || ws.question),
           h("span", { class: "pm-ws-status", style: { color: "var(--pm-fg-faint)" } }, statusGlyph(ws)),
         ]);
         workspaceTabs.appendChild(tab);
@@ -109,73 +139,89 @@ export const chatView = {
     }
 
     function renderActiveWorkspace() {
-      const ws = activeWorkspace(store);
+      const ws = normalizeWorkspace(activeWorkspace(store));
       clear(answerDetail);
       answerDetail.classList.toggle("pm-empty", !ws);
       if (!ws) {
         answerDetail.appendChild(document.createTextNode(ANSWER_PLACEHOLDER));
         return;
       }
-      const terms = (ws.retrieval_query || ws.question || "").split(/\s+/).filter((s) => s.length >= 2);
-      const head = h("div", { class: "pm-section" }, [
-        h("div", { class: "pm-section-title" }, "Question"),
-        h("div", { style: { fontSize: "var(--pm-text-lg)" } }, ws.question),
+      const nodes = [
+        h("div", { class: "pm-section" }, [
+          h("div", { class: "pm-section-title" }, "Conversation"),
+          h("div", { style: { fontSize: "var(--pm-text-lg)" } }, ws.title || ws.question),
+        ]),
+      ];
+      for (const [index, turn] of (ws.turns || []).entries()) {
+        nodes.push(...renderTurn(turn, index + 1));
+      }
+      answerDetail.append(...nodes);
+    }
+
+    function renderTurn(turn, index) {
+      const terms = (turn.retrieval_query || turn.question || "").split(/\s+/).filter((s) => s.length >= 2);
+      const questionBlock = h("div", { class: "pm-section" }, [
+        h("div", { class: "pm-section-title" }, `Question ${index}`),
+        h("div", { style: { fontSize: "var(--pm-text-lg)" } }, turn.question),
       ]);
       const answerBlock = h("div", { class: "pm-section" }, [
         h("div", { class: "pm-section-title" }, [
-          ws.status === "loading" ? "Retrieving…" :
-          ws.status === "error"   ? "Error" :
-          ws.answer_mode === "llm_synthesis" ? "LLM answer" : "Extractive answer",
+          turn.status === "loading" ? "Retrieving..." :
+          turn.status === "error"   ? "Error" :
+          turn.answer_mode === "llm_synthesis" ? "LLM answer" : "Extractive answer",
         ]),
-        h("div", { style: { whiteSpace: "pre-wrap", lineHeight: "var(--pm-leading-loose)" } }, ws.answer || ""),
+        h("div", { style: { whiteSpace: "pre-wrap", lineHeight: "var(--pm-leading-loose)" } }, turn.answer || ""),
       ]);
       const metaItems = [
-        h("span", null, `Top K: ${ws.retrieval?.topK ?? ws.top_k ?? "—"}`),
-        h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
-        h("span", null, `Rerank: ${ws.retrieval?.rerank ? "on" : "off"}`),
-        h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
-        h("span", null, `Concept boost: ${ws.retrieval?.conceptBoost ? "on" : "off"}`),
+        h("span", null, `Top K: ${turn.retrieval?.topK ?? turn.top_k ?? "-"}`),
+        h("span", { style: { color: "var(--pm-fg-faint)" } }, "."),
+        h("span", null, `Rerank: ${turn.retrieval?.rerank ? "on" : "off"}`),
+        h("span", { style: { color: "var(--pm-fg-faint)" } }, "."),
+        h("span", null, `Concept boost: ${turn.retrieval?.conceptBoost ? "on" : "off"}`),
       ];
-      if (ws.retrieval?.useLlm || ws.answer_mode === "llm_synthesis") {
+      if (turn.retrieval?.useLlm || turn.answer_mode === "llm_synthesis") {
         metaItems.unshift(
-          h("span", null, `Provider: ${ws.provider || "—"}`),
-          h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
-          h("span", null, `Model: ${ws.model || "default"}`),
-          h("span", { style: { color: "var(--pm-fg-faint)" } }, "·"),
+          h("span", null, `Provider: ${turn.provider || "-"}`),
+          h("span", { style: { color: "var(--pm-fg-faint)" } }, "."),
+          h("span", null, `Model: ${turn.model || "default"}`),
+          h("span", { style: { color: "var(--pm-fg-faint)" } }, "."),
         );
       }
       const meta = h("div", { class: "pm-evidence-meta" }, metaItems);
       const sources = h("div", { class: "pm-section" }, [
-        h("div", { class: "pm-section-title" }, `Evidence (${(ws.sources || []).length})`),
-        ws.sources?.length
+        h("div", { class: "pm-section-title" }, `Evidence (${(turn.sources || []).length})`),
+        turn.sources?.length
           ? h("div", { style: { display: "flex", flexDirection: "column", gap: "var(--pm-sp-3)" } },
-              ws.sources.map((s) => buildEvidenceCard(s, { store, terms })))
+              turn.sources.map((s) => buildEvidenceCard(s, { store, terms })))
           : h("div", { class: "pm-empty" }, "No evidence retrieved."),
       ]);
-      const warnings = (ws.warnings || []).length
+      const warnings = (turn.warnings || []).length
         ? h("div", { class: "pm-section" }, [
-            h("div", { class: "pm-section-title pm-status-warning" }, `Warnings (${ws.warnings.length})`),
-            h("div", null, ws.warnings.map((w) => h("div", { class: "pm-empty" }, w))),
+            h("div", { class: "pm-section-title pm-status-warning" }, `Warnings (${turn.warnings.length})`),
+            h("div", null, turn.warnings.map((w) => h("div", { class: "pm-empty" }, w))),
           ])
         : null;
-      answerDetail.append(head, answerBlock, meta, sources, ...(warnings ? [warnings] : []));
+      return [questionBlock, answerBlock, meta, sources, ...(warnings ? [warnings] : [])];
     }
   },
 
   unmount() { this._cleanup?.(); },
 };
 
-function statusGlyph(ws) {
-  if (ws.status === "loading") return "⟳";
-  if (ws.status === "error")   return "!";
-  return `${(ws.sources || []).length}`;
+function statusGlyph(workspace) {
+  const ws = normalizeWorkspace(workspace);
+  if (!ws) return "0";
+  const latest = ws.turns?.[ws.turns.length - 1];
+  if (latest?.status === "loading") return "⟳";
+  if (latest?.status === "error") return "!";
+  return `${(ws.turns || []).length}`;
 }
 
-function createWorkspace({ query, filters, retrieval }) {
+function createTurn({ query, filters, retrieval }) {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     question: query,
-    answer: "Retrieving evidence…",
+    answer: "Retrieving evidence...",
     status: "loading",
     answer_mode: "",
     sources: [],
@@ -189,14 +235,85 @@ function createWorkspace({ query, filters, retrieval }) {
   };
 }
 
+function createWorkspace({ turn, filters, retrieval }) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    title: turn.question,
+    question: turn.question,
+    status: turn.status,
+    turns: [turn],
+    filters,
+    retrieval,
+    provider: retrieval.provider || "ollama",
+    model: retrieval.model || "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function normalizeWorkspace(ws) {
+  if (!ws || typeof ws !== "object") return null;
+  if (Array.isArray(ws.turns)) {
+    const turns = ws.turns.filter((t) => t && typeof t === "object").map((t) => ({
+      id: t.id || `${ws.id || Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      question: t.question || t.query || ws.question || ws.query || "",
+      answer: t.answer || t.response || "",
+      status: t.status || "ready",
+      answer_mode: t.answer_mode || t.mode || "",
+      sources: Array.isArray(t.sources) ? t.sources : [],
+      retrieval_query: t.retrieval_query || t.query || t.question || "",
+      filters: t.filters || ws.filters || {},
+      retrieval: t.retrieval || ws.retrieval || {},
+      provider: t.provider || ws.provider || ws.retrieval?.provider || "ollama",
+      model: t.model || ws.model || ws.retrieval?.model || "",
+      warnings: Array.isArray(t.warnings) ? t.warnings : [],
+      created_at: t.created_at || t.createdAt || ws.created_at || ws.createdAt || new Date().toISOString(),
+    })).filter((t) => t.question || t.answer);
+    return {
+      ...ws,
+      title: ws.title || ws.question || ws.query || turns[0]?.question || "Conversation",
+      question: ws.question || ws.query || turns[0]?.question || "Conversation",
+      status: ws.status || turns[turns.length - 1]?.status || "ready",
+      turns,
+    };
+  }
+  const question = ws.question || ws.query || "";
+  const turn = {
+    id: `${ws.id || Date.now()}-turn`,
+    question,
+    answer: ws.answer || ws.response || "",
+    status: ws.status || "ready",
+    answer_mode: ws.answer_mode || ws.mode || "",
+    sources: Array.isArray(ws.sources) ? ws.sources : [],
+    retrieval_query: ws.retrieval_query || question,
+    filters: ws.filters || {},
+    retrieval: ws.retrieval || {},
+    provider: ws.provider || ws.retrieval?.provider || "ollama",
+    model: ws.model || ws.retrieval?.model || "",
+    warnings: Array.isArray(ws.warnings) ? ws.warnings : [],
+    created_at: ws.created_at || ws.createdAt || new Date().toISOString(),
+  };
+  return {
+    ...ws,
+    title: ws.title || question || "Conversation",
+    question: question || "Conversation",
+    status: turn.status,
+    turns: question || turn.answer ? [turn] : [],
+  };
+}
+
 function pushWorkspace(store, ws) {
-  const list = [ws, ...(store.get("workspaces") || [])].slice(0, 24);
+  const existing = (store.get("workspaces") || []).filter((item) => item.id !== ws.id);
+  const list = [ws, ...existing].slice(0, 24);
   store.set({ workspaces: list, activeWorkspaceId: ws.id });
   saveWorkspaces(list);
 }
 
 function replaceWorkspace(store, ws) {
-  const list = (store.get("workspaces") || []).map((w) => (w.id === ws.id ? ws : w));
+  const current = store.get("workspaces") || [];
+  const list = current.some((w) => w.id === ws.id)
+    ? current.map((w) => (w.id === ws.id ? ws : w))
+    : [ws, ...current].slice(0, 24);
   store.set({ workspaces: list });
   saveWorkspaces(list);
 }
@@ -206,9 +323,38 @@ function activeWorkspace(store) {
   return (store.get("workspaces") || []).find((w) => w.id === id) || null;
 }
 
+function buildHistoryPayload(ws, pendingTurnId) {
+  return (ws.turns || [])
+    .filter((turn) => turn.id !== pendingTurnId && turn.status === "ready")
+    .slice(-HISTORY_TURN_LIMIT)
+    .map((turn) => ({
+      question: compact(turn.question, 400),
+      answer: compact(turn.answer, 1000),
+      answer_mode: turn.answer_mode || "",
+      sources: (turn.sources || []).slice(0, HISTORY_SOURCE_LIMIT).map(historySource),
+    }));
+}
+
+function historySource(source) {
+  return {
+    document_id: source.document_id ?? null,
+    document_title: compact(source.document_title, 180),
+    source_path: compact(source.source_path, 260),
+    section_title: compact(source.section_title, 180),
+    chunk_id: source.chunk_id ?? "",
+    snippet: compact(source.snippet, 400),
+  };
+}
+
+function compact(value, limit) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (text.length <= limit) return text;
+  return text.slice(0, Math.max(0, limit - 3)).trimEnd() + "...";
+}
+
 function seedWorkspaces(store) {
   if (store.get("workspaces") != null) return;
-  const stored = loadWorkspaces();
+  const stored = loadWorkspaces().map(normalizeWorkspace).filter(Boolean);
   store.set({
     workspaces: stored,
     activeWorkspaceId: stored[0]?.id || null,

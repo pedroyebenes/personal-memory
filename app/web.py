@@ -39,6 +39,9 @@ LOGGER = logging.getLogger(__name__)
 _initialized_db_paths: set[str] = set()
 _db_init_lock = threading.Lock()
 
+CHAT_HISTORY_TURNS = 6
+CHAT_HISTORY_SOURCES_PER_TURN = 5
+
 WEB_ASSETS_ROOT = Path(__file__).with_name("web_assets").resolve()
 
 STATIC_CONTENT_TYPES = {
@@ -1103,6 +1106,66 @@ def _serialize_filters(filters: SearchFilters) -> dict[str, object]:
     }
 
 
+def _compact_chat_text(value: object, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _read_chat_history(payload: dict[str, Any]) -> list[dict[str, object]]:
+    raw_history = payload.get("history", [])
+    if raw_history is None:
+        return []
+    if not isinstance(raw_history, list):
+        return []
+    history: list[dict[str, object]] = []
+    for raw_turn in raw_history[-CHAT_HISTORY_TURNS:]:
+        if not isinstance(raw_turn, dict):
+            continue
+        turn: dict[str, object] = {}
+        question = _compact_chat_text(raw_turn.get("question"), 400)
+        answer = _compact_chat_text(raw_turn.get("answer"), 1000)
+        answer_mode = _compact_chat_text(raw_turn.get("answer_mode"), 80)
+        if question:
+            turn["question"] = question
+        if answer:
+            turn["answer"] = answer
+        if answer_mode:
+            turn["answer_mode"] = answer_mode
+        raw_sources = raw_turn.get("sources", [])
+        sources: list[dict[str, object]] = []
+        if isinstance(raw_sources, list):
+            for raw_source in raw_sources[:CHAT_HISTORY_SOURCES_PER_TURN]:
+                if not isinstance(raw_source, dict):
+                    continue
+                source: dict[str, object] = {}
+                for key, limit in (
+                    ("document_title", 180),
+                    ("source_path", 260),
+                    ("section_title", 180),
+                    ("snippet", 400),
+                ):
+                    text = _compact_chat_text(raw_source.get(key), limit)
+                    if text:
+                        source[key] = text
+                for key in ("document_id", "chunk_id"):
+                    value = raw_source.get(key)
+                    if isinstance(value, int):
+                        source[key] = value
+                    elif isinstance(value, str) and value.strip():
+                        source[key] = value.strip()
+                if source:
+                    sources.append(source)
+        if sources:
+            turn["sources"] = sources
+        if turn:
+            history.append(turn)
+    return history
+
+
 def _vault_relative_path(source_path: str, settings: Settings) -> str:
     if settings.vault_path is None:
         return source_path
@@ -1512,6 +1575,7 @@ def handle_api_post(
     use_rerank = _read_bool(payload, "rerank", settings.enable_reranking)
     use_concept_boost = _read_bool(payload, "concept_boost", settings.enable_concept_boost)
     filters = _read_filters(payload, settings)
+    history = _read_chat_history(payload)
 
     request_settings = replace(settings, llm_provider=provider, synthesis_model_name=model)
     _validate_provider_request(request_settings, provider, require_provider=use_llm or use_query_rewrite)
@@ -1527,6 +1591,7 @@ def handle_api_post(
             use_rerank=use_rerank,
             use_concept_boost=use_concept_boost,
             filters=filters,
+            conversation_history=history,
         )
     )
     response["filters"] = _serialize_filters(filters)

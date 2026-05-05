@@ -37,6 +37,7 @@ def _semantic_search_scan(
             c.chunk_index,
             c.section_title,
             c.text,
+            d.id AS document_id,
             d.title AS document_title,
             d.source_path,
             e.vector_json
@@ -62,6 +63,7 @@ def _semantic_search_scan(
                 keyword_score=None,
                 semantic_score=semantic_score,
                 final_score=semantic_score,
+                document_id=int(row["document_id"]),
             )
         )
     scored.sort(key=lambda item: item.final_score, reverse=True)
@@ -114,6 +116,7 @@ def _semantic_search_ann(
             c.chunk_index,
             c.section_title,
             c.text,
+            d.id AS document_id,
             d.title AS document_title,
             d.source_path
         FROM chunks c
@@ -144,6 +147,7 @@ def _semantic_search_ann(
                 keyword_score=None,
                 semantic_score=sem,
                 final_score=sem,
+                document_id=int(row["document_id"]),
             )
         )
         if len(scored) >= top_k:

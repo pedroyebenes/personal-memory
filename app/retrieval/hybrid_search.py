@@ -45,6 +45,7 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
         SELECT
             c.id AS chunk_id,
             c.text,
+            d.id AS document_id,
             d.source_path,
             d.title,
             d.last_modified,
@@ -55,7 +56,7 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
         LEFT JOIN document_tags dt ON dt.document_id = d.id
         LEFT JOIN document_aliases da ON da.document_id = d.id
         WHERE c.id IN ({placeholders})
-        GROUP BY c.id, c.text, d.source_path, d.title, d.last_modified
+        GROUP BY c.id, c.text, d.id, d.source_path, d.title, d.last_modified
         """,
         tuple(chunk_ids),
     ).fetchall()
@@ -63,6 +64,7 @@ def _load_chunk_metadata(connection: sqlite3.Connection, chunk_ids: set[int]) ->
     for row in rows:
         metadata[int(row["chunk_id"])] = {
             "text": row["text"],
+            "document_id": int(row["document_id"]),
             "source_path": row["source_path"],
             "title": row["title"],
             "last_modified": row["last_modified"],
@@ -303,6 +305,7 @@ def hybrid_search(
                 matched_concepts=[],
                 source_ref=build_source_ref(base.source_path, base.section_title),
                 markdown_ref=build_markdown_ref(base.document_title, base.source_path, base.section_title),
+                document_id=int(metadata.get(chunk_id, {}).get("document_id") or base.document_id or 0) or None,
             )
         )
     candidate_count_before_filters = len(merged)

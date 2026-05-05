@@ -36,31 +36,82 @@ def _format_sources(sources: list[dict[str, object]]) -> str:
     blocks: list[str] = []
     for index, source in enumerate(sources, start=1):
         section_title = source.get("section_title") or "No section title"
-        blocks.append(
-            "\n".join(
-                [
-                    f"[Source {index}]",
-                    f"Document: {source['document_title']}",
-                    f"Path: {source['source_path']}",
-                    f"Section: {section_title}",
-                    f"Chunk ID: {source['chunk_id']}",
-                    f"Snippet: {source['snippet']}",
-                ]
-            )
-        )
+        lines = [
+            f"[Source {index}]",
+            f"Document: {source['document_title']}",
+            f"Path: {source['source_path']}",
+            f"Section: {section_title}",
+            f"Chunk ID: {source['chunk_id']}",
+            f"Snippet: {source['snippet']}",
+        ]
+        context = source.get("context")
+        if isinstance(context, str) and context.strip():
+            lines.extend(["Expanded context:", context.strip()])
+        blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
-def _build_prompt(question: str, sources: list[dict[str, object]]) -> str:
+def _compact_text(value: object, limit: int = 500) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _format_conversation_history(history: list[dict[str, object]] | None) -> str:
+    if not isinstance(history, list):
+        return ""
+    blocks: list[str] = []
+    for index, turn in enumerate(history[-6:], start=1):
+        if not isinstance(turn, dict):
+            continue
+        question = _compact_text(turn.get("question"), limit=300)
+        answer = _compact_text(turn.get("answer"), limit=500)
+        lines = [f"[Turn {index}]"]
+        if question:
+            lines.append(f"Question: {question}")
+        if answer:
+            lines.append(f"Answer: {answer}")
+        sources = turn.get("sources", [])
+        if isinstance(sources, list):
+            labels = []
+            for source in sources[:3]:
+                if not isinstance(source, dict):
+                    continue
+                title = _compact_text(source.get("document_title"), limit=120)
+                section = _compact_text(source.get("section_title"), limit=120)
+                path = _compact_text(source.get("source_path"), limit=180)
+                label = " / ".join(part for part in (title, section, path) if part)
+                if label:
+                    labels.append(label)
+            if labels:
+                lines.append("Sources: " + "; ".join(labels))
+        if len(lines) > 1:
+            blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _build_prompt(
+    question: str,
+    sources: list[dict[str, object]],
+    conversation_history: list[dict[str, object]] | None = None,
+) -> str:
+    history = _format_conversation_history(conversation_history)
+    history_block = f"Conversation context:\n{history}\n\n" if history else ""
     return (
         "Answer the user's question using only the provided sources.\n"
         "Rules:\n"
         "- Do not introduce facts that are not in the sources.\n"
         "- If the evidence is insufficient, say so plainly.\n"
         "- Cite supporting claims inline using [Source N].\n"
+        "- For follow-up questions, use conversation context to resolve references like that chunk, the note, or it.\n"
+        "- Use conversation context only for reference resolution; factual claims must be supported by the sources.\n"
         "- Answer in the primary language of the evidence snippets, even if the question uses another language.\n"
         "- If sources use multiple languages, use the language of the most relevant evidence.\n"
         "- Keep the answer concise and readable.\n\n"
+        f"{history_block}"
         f"Question:\n{question}\n\n"
         f"Sources:\n{_format_sources(sources)}"
     )
@@ -248,8 +299,13 @@ def _extract_chat_completions_text(result: dict[str, object], provider_name: str
     raise RuntimeError(f"{provider_name} API response did not contain text output.")
 
 
-def synthesize_answer(question: str, sources: list[dict[str, object]], settings: Settings) -> str:
-    prompt = _build_prompt(question, sources)
+def synthesize_answer(
+    question: str,
+    sources: list[dict[str, object]],
+    settings: Settings,
+    conversation_history: list[dict[str, object]] | None = None,
+) -> str:
+    prompt = _build_prompt(question, sources, conversation_history=conversation_history)
     return _generate_text(
         prompt,
         settings,

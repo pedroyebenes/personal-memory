@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,6 +9,17 @@ from app.db import connect, init_db
 from app.ingest.register import ingest_vault
 from app import web
 from app.web import APIError, RefreshState, _error_payload, _read_web_asset, handle_api_get, handle_api_post
+
+
+def _wait_for_refresh(refresh_state: RefreshState, timeout: float = 5.0) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    snapshot = refresh_state.snapshot()
+    while snapshot["in_progress"]:
+        if time.monotonic() >= deadline:
+            raise AssertionError("Timed out waiting for refresh to finish")
+        time.sleep(0.01)
+        snapshot = refresh_state.snapshot()
+    return snapshot
 
 
 def test_shell_loads_design_tokens_and_main_module() -> None:
@@ -64,9 +76,20 @@ def test_chat_view_rerenders_when_workspace_payload_changes() -> None:
 def test_chat_view_only_shows_provider_for_llm_answers() -> None:
     chat = _read_web_asset("views/chat.js")
 
-    assert 'ws.retrieval?.useLlm || ws.answer_mode === "llm_synthesis"' in chat
+    assert 'turn.retrieval?.useLlm || turn.answer_mode === "llm_synthesis"' in chat
     assert "Provider:" in chat
     assert "Model:" in chat
+
+
+def test_chat_view_sends_bounded_thread_history() -> None:
+    chat = _read_web_asset("views/chat.js")
+
+    assert "const HISTORY_TURN_LIMIT = 6" in chat
+    assert "const HISTORY_SOURCE_LIMIT = 5" in chat
+    assert "buildHistoryPayload(ws, turn.id)" in chat
+    assert "history," in chat
+    assert "Array.isArray(ws.turns)" in chat
+    assert "New thread" in chat
 
 
 def test_evidence_card_links_to_docs_reader() -> None:
@@ -318,10 +341,14 @@ def test_refresh_rebuilds_concepts_for_skipped_documents(connection, fixture_vau
 
     status, payload = handle_api_post("/api/refresh", {}, settings, refresh_state, with_connection)
 
-    assert int(status) == 200
-    assert payload["skipped"] == 3
-    assert payload["concepts"]["entities"] > 0
-    assert payload["concepts"]["mentions"] > 0
+    assert int(status) == 202
+    assert payload["status"] == "started"
+    snapshot = _wait_for_refresh(refresh_state)
+    result = snapshot["last_result"]
+    assert isinstance(result, dict)
+    assert result["skipped"] == 3
+    assert result["concepts"]["entities"] > 0
+    assert result["concepts"]["mentions"] > 0
 
 
 def test_refresh_returns_structured_failure_and_tracks_last_result(settings: Settings, monkeypatch) -> None:
@@ -334,19 +361,13 @@ def test_refresh_returns_structured_failure_and_tracks_last_result(settings: Set
     init_db(connection)
     try:
         with_connection = lambda callback: callback(connection)
-        try:
-            handle_api_post("/api/refresh", {}, settings, refresh_state, with_connection)
-        except APIError as exc:
-            status = exc.status
-            payload = _error_payload(exc)
-        else:
-            raise AssertionError("Expected APIError")
+        status, payload = handle_api_post("/api/refresh", {}, settings, refresh_state, with_connection)
     finally:
         connection.close()
 
-    snapshot = refresh_state.snapshot()
-    assert int(status) == 500
-    assert payload["error"]["code"] == "refresh_failed"
+    assert int(status) == 202
+    assert payload["status"] == "started"
+    snapshot = _wait_for_refresh(refresh_state)
     assert snapshot["in_progress"] is False
     assert snapshot["last_result"]["status"] == "failed"
     assert snapshot["last_result"]["error"] == "disk full"
@@ -554,6 +575,79 @@ def test_chat_response_includes_provider_model_and_filters(connection, fixture_v
     assert payload["filters"]["date_from"] == "2000-01-01T00:00:00+00:00"
     assert payload["sources"]
     assert "source_ref" in payload["sources"][0]
+    assert "document_id" in payload["sources"][0]
+
+
+def test_chat_accepts_history_and_passes_it_to_qa(connection, settings: Settings, monkeypatch) -> None:
+    captured = {}
+
+    def fake_answer_question(local_connection, query, request_settings, **kwargs):
+        captured["query"] = query
+        captured["history"] = kwargs["conversation_history"]
+        return {
+            "question": query,
+            "retrieval_query": query,
+            "answer": "ok",
+            "sources": [],
+            "answer_mode": "extractive",
+            "warnings": [],
+            "provider": request_settings.llm_provider,
+            "model": request_settings.get_synthesis_model_name(),
+        }
+
+    monkeypatch.setattr(web, "answer_question", fake_answer_question)
+    with_connection = lambda callback: callback(connection)
+
+    status, payload = handle_api_post(
+        "/api/chat",
+        {
+            "query": "What about that chunk?",
+            "provider": "ollama",
+            "history": [
+                "ignored",
+                {
+                    "question": "What did the Atlas note say?",
+                    "answer": "It described the cache.",
+                    "answer_mode": "llm_synthesis",
+                    "sources": [
+                        {
+                            "document_id": 4,
+                            "document_title": "Atlas Note",
+                            "source_path": "/vault/atlas.md",
+                            "section_title": "Decision",
+                            "chunk_id": "9",
+                            "snippet": "The cache is local.",
+                        }
+                    ],
+                },
+                {"question": 123, "sources": "ignored"},
+            ],
+        },
+        settings,
+        RefreshState(),
+        with_connection,
+    )
+
+    assert int(status) == 200
+    assert payload["answer"] == "ok"
+    assert captured["query"] == "What about that chunk?"
+    assert captured["history"] == [
+        {
+            "question": "What did the Atlas note say?",
+            "answer": "It described the cache.",
+            "answer_mode": "llm_synthesis",
+            "sources": [
+                {
+                    "document_title": "Atlas Note",
+                    "source_path": "/vault/atlas.md",
+                    "section_title": "Decision",
+                    "snippet": "The cache is local.",
+                    "document_id": 4,
+                    "chunk_id": "9",
+                }
+            ],
+        }
+    ]
 
 
 def test_chat_accepts_rerank_flag(connection, fixture_vault: Path, settings: Settings) -> None:

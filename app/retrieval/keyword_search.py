@@ -38,6 +38,7 @@ def keyword_search(connection: sqlite3.Connection, query: str, top_k: int = 5) -
             c.chunk_index,
             c.section_title,
             c.text,
+            d.id AS document_id,
             d.title AS document_title,
             d.source_path,
             bm25(chunks_fts, ?, ?, ?) AS score
@@ -71,6 +72,7 @@ def keyword_search(connection: sqlite3.Connection, query: str, top_k: int = 5) -
                 keyword_score=keyword_score,
                 semantic_score=None,
                 final_score=keyword_score,
+                document_id=int(row["document_id"]),
             )
         )
     return results
